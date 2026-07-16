@@ -5,7 +5,8 @@ import { bearerAuth, logging, retry, telemetry } from "../src/middleware";
 describe("fetch contracts", () => {
   it("should infer required path values given a brace parameter when calling", async () => {
     const transport = vi.fn(async (request: Request) => new Response(JSON.stringify({ url: request.url }), { headers: { "content-type": "application/json" } }));
-    const client = createClient(defineApi({ getUser: get("/users/{id}").returns(json<{ url: string }>()) }), { baseUrl: "https://example.test", fetch: transport });
+    const client = createClient(defineApi({ getUser: get("/users/{id}").params<{ id: string | number }>().returns(json<{ url: string }>()) }), { baseUrl: "https://example.test", fetch: transport });
+    // @ts-expect-error path params are required by the operation contract
     expect(await client.getUser()).toMatchObject({ ok: false, kind: "request" });
     expect(await client.getUser({ params: { id: 7 } })).toMatchObject({ ok: true, data: { url: "https://example.test/users/7" } });
   });
@@ -47,5 +48,28 @@ describe("fetch contracts", () => {
   });
   it("should freeze builders clients and descriptors given an API when constructed", () => {
     const api = defineApi({ create: post("/x").body(json()).returns(201, json()), read: get("/x").returns(text()) }); expect(Object.isFrozen(api.endpoints.create)).toBe(true); expect(Object.isFrozen(createClient(api))).toBe(true);
+  });
+  it("should decode by literal status given multiple success responses when calling", async () => {
+    const api = defineApi({ create: post("/jobs").headers<{ "x-mode"?: string }>({ "x-mode": { style: "simple" } }).body(json<{ name: string }>()).returns(201, json<{ id: string }>()).returns(202, text()).errors({ 409: json<{ title: string }>(), default: text() }) });
+    const client = createClient(api, { baseUrl: "https://example.test", fetch: async (request) => request.headers.get("x-mode") === "async" ? new Response("queued", { status: 202, headers: { "content-type": "text/plain" } }) : new Response(JSON.stringify({ id: "job-1" }), { status: 201, headers: { "content-type": "application/json" } }) });
+    const created = await client.create({ body: { name: "deploy" }, headers: { "x-mode": "sync" } });
+    expect(created).toMatchObject({ ok: true, status: 201, data: { id: "job-1" } });
+    const queued = await client.create({ body: { name: "deploy" }, headers: { "x-mode": "async" } });
+    expect(queued).toMatchObject({ ok: true, status: 202, data: "queued" });
+    if (created.ok && created.status === 201) created.data.id satisfies string;
+    // @ts-expect-error body is required by this operation
+    void client.create();
+  });
+  it("should serialize OpenAPI styles given structured parameters when calling", async () => {
+    const requests: Request[] = [];
+    const api = defineApi({ read: get("/things/{coords}")
+      .params<{ coords: number[] }>({ coords: { style: "label", explode: true } })
+      .query<{ tags: string[]; filter: { state: string } }>({ tags: { style: "pipeDelimited", explode: false }, filter: { style: "deepObject", explode: true } })
+      .headers<{ "x-flags": { dry: boolean; force: boolean } }>({ "x-flags": { style: "simple", explode: true } })
+      .returns(text()) });
+    const client = createClient(api, { baseUrl: "https://example.test", fetch: async (request) => { requests.push(request); return new Response("ok", { headers: { "content-type": "text/plain" } }); } });
+    await client.read({ params: { coords: [10, 20] }, query: { tags: ["a", "b"], filter: { state: "open" } }, headers: { "x-flags": { dry: true, force: false } } });
+    expect(requests[0]!.url).toBe("https://example.test/things/.10.20?tags=a%7Cb&filter%5Bstate%5D=open");
+    expect(requests[0]!.headers.get("x-flags")).toBe("dry=true,force=false");
   });
 });
