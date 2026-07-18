@@ -35,7 +35,7 @@ try {
   assert.equal(installedPackage.dependencies, undefined);
 
   writeFileSync(
-    join(consumer, "smoke.mjs"),
+    join(consumer, "smoke.js"),
     `
       import assert from "node:assert/strict";
       import { createClient, defineApi, get, text } from "@askrjs/fetch";
@@ -57,7 +57,7 @@ try {
       assert.equal(result.url, "https://example.test/health");
     `,
   );
-  execFileSync(process.execPath, [join(consumer, "smoke.mjs")], { cwd: consumer, stdio: "pipe" });
+  execFileSync(process.execPath, [join(consumer, "smoke.js")], { cwd: consumer, stdio: "pipe" });
 
   writeFileSync(
     join(consumer, "fixture.ts"),
