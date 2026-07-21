@@ -1,5 +1,8 @@
 # @askrjs/fetch
 
+[![CI](https://github.com/askrjs/askr-fetch/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrjs/askr-fetch/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40askrjs%2Ffetch.svg)](https://www.npmjs.com/package/@askrjs/fetch)
+
 Function-first HTTP contracts, typed clients, codecs, and middleware for Askr. The package is
 ESM-only, has no runtime dependencies, and works with the standard Fetch APIs in modern browsers
 and Node.js 20.19 or newer.
