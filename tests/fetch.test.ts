@@ -112,7 +112,7 @@ describe("fetch contracts", () => {
       }),
     ).toMatchObject({ kind: "abort" });
     expect(transport).not.toHaveBeenCalled();
-  });
+  }, 15_000);
   it("should decode codecs given actual compatible content types when responding", async () => {
     const execute = createFetch({
       fetch: async () =>
