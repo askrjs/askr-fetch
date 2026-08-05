@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "package": "@askrjs/fetch",
+  "capabilities": [
+    {
+      "intent": "typed HTTP API contracts and generated clients",
+      "package": "@askrjs/fetch",
+      "import": "@askrjs/fetch",
+      "exports": ["createClient", "defineApi", "get", "post", "FetchResult"],
+      "constraints": ["paths use OpenAPI-style {name} parameters", "results are discriminated"],
+      "stability": "stable",
+      "docs": "https://github.com/askrjs/askr-fetch/blob/main/README.md",
+      "docsPath": "README.md"
+    },
+    {
+      "intent": "result narrowing and exception-based unwrapping",
+      "package": "@askrjs/fetch",
+      "import": "@askrjs/fetch",
+      "exports": ["unwrap", "FetchResult"],
+      "constraints": ["unwrap throws for non-success results"],
+      "stability": "stable",
+      "docs": "https://github.com/askrjs/askr-fetch/blob/main/README.md",
+      "docsPath": "README.md"
+    },
+    {
+      "intent": "request middleware and retries",
+      "package": "@askrjs/fetch",
+      "import": "@askrjs/fetch/middleware",
+      "exports": ["bearerAuth", "apiKeyAuth", "logging", "retry", "telemetry"],
+      "constraints": ["middleware runs in declaration order", "request bodies are not retried automatically"],
+      "stability": "stable",
+      "docs": "https://github.com/askrjs/askr-fetch/blob/main/README.md",
+      "docsPath": "README.md"
+    }
+  ]
+}
