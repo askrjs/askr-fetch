@@ -15,7 +15,8 @@ try {
     ["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox],
     { cwd: repositoryRoot, encoding: "utf8" },
   );
-  const [{ filename }] = JSON.parse(packOutput);
+  const packed = JSON.parse(packOutput);
+  const { filename } = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
   const tarball = join(sandbox, filename);
   const consumer = join(sandbox, "consumer");
   mkdirSync(consumer);
