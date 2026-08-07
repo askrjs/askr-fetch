@@ -61,7 +61,7 @@
     "prepublishOnly": "npm run check"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "publint": "^0.3.23",
     "typescript": "^7.0.2",
     "vite-plus": "^0.2.8",
