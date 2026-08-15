@@ -289,6 +289,33 @@ describe("fetch contracts", () => {
       expect(headers).toEqual(["application/json|preserved", "application/json|preserved"]);
     },
   );
+  it.each([
+    ["a non-eligible POST", { method: "POST", timeout: undefined, delay: 0 }],
+    ["an exhausted deadline", { method: "PUT", timeout: 5, delay: 1_000 }],
+  ] as const)("should preserve one attempt for %s", async (_label, options) => {
+    const transport = vi.fn(async (request: Request) => {
+      await request.text();
+      return new Response("retry", {
+        status: 503,
+        headers: { "content-type": "text/plain" },
+      });
+    });
+    const result = await createFetch({
+      middleware: [retry({ attempts: 2, delay: () => options.delay })],
+      fetch: transport,
+      ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+    })({
+      url: "https://x.test/resource",
+      method: options.method,
+      body: { name: "unchanged" },
+      bodyCodec: json(),
+      response: text(),
+      errors: { 503: text() },
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: "http", status: 503 });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
   it("should skip retries without throwing when an earlier middleware consumed the body", async () => {
     const transport = vi.fn(async () =>
       Promise.resolve(new Response("ok", { headers: { "content-type": "text/plain" } })),
