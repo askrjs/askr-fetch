@@ -184,6 +184,34 @@ describe("fetch contracts", () => {
     expect(JSON.stringify(logs)).not.toContain("secret");
     expect(spans).toEqual(["start", "end"]);
   });
+  it("should refresh auth and observe each attempt given the README middleware order", async () => {
+    const authorizations: (string | null)[] = [];
+    const logs: Record<string, unknown>[] = [];
+    const spans: string[] = [];
+    let tokenCalls = 0;
+    const execute = createFetch({
+      middleware: [
+        retry({ attempts: 2, delay: () => 0 }),
+        bearerAuth({ token: () => `token-${++tokenCalls}` }),
+        logging({ log: (event) => logs.push(event) }),
+        telemetry({ start: () => spans.push("start"), end: () => spans.push("end") }),
+      ],
+      fetch: async (request) => {
+        authorizations.push(request.headers.get("authorization"));
+        return new Response(authorizations.length === 1 ? "later" : "ok", {
+          status: authorizations.length === 1 ? 503 : 200,
+          headers: { "content-type": "text/plain", "retry-after": "0" },
+        });
+      },
+    });
+
+    await expect(
+      execute({ url: "https://x.test", response: text(), errors: { 503: text() } }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(authorizations).toEqual(["Bearer token-1", "Bearer token-2"]);
+    expect(logs).toHaveLength(4);
+    expect(spans).toEqual(["start", "end", "start", "end"]);
+  });
   it("should redact header and query API keys given auth before logging when executing", async () => {
     const logs: Record<string, unknown>[] = [];
     const logger = { log: (event: Record<string, unknown>) => logs.push(event) };
@@ -216,6 +244,67 @@ describe("fetch contracts", () => {
     })({ url: "https://x.test", response: text() });
     expect(result).toMatchObject({ ok: true, data: "ok" });
     expect(transport).toHaveBeenCalledTimes(2);
+  });
+  it.each(["status", "network"] as const)(
+    "should retry replayable PUT bodies after a %s failure",
+    async (failure) => {
+      const bodies: string[] = [];
+      const headers: string[] = [];
+      const transport = vi.fn(async (request: Request) => {
+        bodies.push(await request.text());
+        headers.push(`${request.headers.get("content-type")}|${request.headers.get("x-request")}`);
+        if (bodies.length === 1) {
+          if (failure === "network") throw new Error("offline");
+          return new Response("retry", {
+            status: 503,
+            headers: { "content-type": "text/plain", "retry-after": "0" },
+          });
+        }
+        return new Response("ok", { headers: { "content-type": "text/plain" } });
+      });
+      const result = await createFetch({
+        middleware: [retry({ attempts: 2, delay: () => 0 })],
+        fetch: transport,
+      })({
+        url: "https://x.test/resource",
+        method: "PUT",
+        headers: { "x-request": "preserved" },
+        body: { name: "updated" },
+        bodyCodec: json(),
+        response: text(),
+        errors: { 503: text() },
+      });
+
+      expect(result).toMatchObject({ ok: true, data: "ok" });
+      expect(transport).toHaveBeenCalledTimes(2);
+      expect(bodies).toEqual(['{"name":"updated"}', '{"name":"updated"}']);
+      expect(headers).toEqual([
+        "application/json|preserved",
+        "application/json|preserved",
+      ]);
+    },
+  );
+  it("should skip retries without throwing when an earlier middleware consumed the body", async () => {
+    const transport = vi.fn(async () =>
+      Promise.resolve(new Response("ok", { headers: { "content-type": "text/plain" } })),
+    );
+    const consumeBody = async (context: any, next: any) => {
+      await context.request.text();
+      return next(context);
+    };
+    const result = await createFetch({
+      middleware: [consumeBody, retry({ attempts: 2, delay: () => 0 })],
+      fetch: transport,
+    })({
+      url: "https://x.test/resource",
+      method: "PUT",
+      body: "already consumed",
+      bodyCodec: text(),
+      response: text(),
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(transport).toHaveBeenCalledTimes(1);
   });
   it("should freeze builders clients and descriptors given an API when constructed", () => {
     const query = { q: { style: "form" as const, explode: true } };
@@ -293,6 +382,30 @@ describe("fetch contracts", () => {
       "https://example.test/things/.10.20?tags=a%7Cb&filter%5Bstate%5D=open",
     );
     expect(requests[0]!.headers.get("x-flags")).toBe("dry=true,force=false");
+  });
+  it("should serialize special query values consistently in scalar and array positions", async () => {
+    let request: Request | undefined;
+    await createFetch({
+      fetch: async (value) => {
+        request = value;
+        return new Response("ok", { headers: { "content-type": "text/plain" } });
+      },
+    })({
+      url: "https://example.test/search",
+      query: {
+        scalarNull: null,
+        arrayNull: [null],
+        scalarUndefined: undefined,
+        arrayUndefined: [undefined],
+        scalarNaN: Number.NaN,
+        arrayNaN: [Number.NaN],
+      },
+      response: text(),
+    });
+
+    expect(request?.url).toBe(
+      "https://example.test/search?scalarNull=null&arrayNull=null&scalarNaN=NaN&arrayNaN=NaN",
+    );
   });
   it("should validate and transform parameters given validators when calling", async () => {
     const validator = {
