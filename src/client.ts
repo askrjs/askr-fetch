@@ -163,8 +163,12 @@ function queryParameter(
 ): void {
   const style = spec.style ?? "form";
   const explode = spec.explode ?? true;
-  const object = entries(value);
+  const object = entries(value).filter(([, item]) => item !== undefined);
   const array = Array.isArray(value);
+  const emptyArray = array && value.length === 0;
+  const items = values(value)
+    .filter((item) => item !== undefined)
+    .map(String);
   const append = (key: string, item: unknown) => output.append(key, String(item));
   if (style === "deepObject") {
     if (!object.length) throw new TypeError(`deepObject query parameter ${name} must be an object`);
@@ -173,17 +177,18 @@ function queryParameter(
   }
   if (style === "spaceDelimited" || style === "pipeDelimited") {
     if (!array) throw new TypeError(`${style} query parameter ${name} must be an array`);
-    append(name, values(value).join(style === "spaceDelimited" ? " " : "|"));
+    if (items.length || emptyArray)
+      append(name, items.join(style === "spaceDelimited" ? " " : "|"));
     return;
   }
   if (style !== "form") throw new TypeError(`Unsupported query parameter style: ${style}`);
   if (object.length) {
     if (explode) for (const [key, item] of object) append(key, item);
-    else append(name, object.flatMap(([key, item]) => [key, item]).join(","));
+    else append(name, object.flatMap(([key, item]) => [key, String(item)]).join(","));
     return;
   }
-  if (array && explode) for (const item of values(value)) append(name, item);
-  else append(name, values(value).join(","));
+  if (array && explode) for (const item of items) append(name, item);
+  else if (items.length || emptyArray) append(name, items.join(","));
 }
 function headerParameter(value: unknown, spec: ParameterSpec = {}): string {
   if ((spec.style ?? "simple") !== "simple")
@@ -361,6 +366,7 @@ export function createFetch(options: ClientOptions = {}) {
           operationId: call.operationId,
           security: call.endpoint?.security,
           attempt: 1,
+          ...(body === undefined ? {} : { replayableBody: !(body instanceof ReadableStream) }),
           ...(timeout === undefined ? {} : { deadline: Date.now() + timeout }),
         }),
       );

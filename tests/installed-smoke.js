@@ -61,6 +61,41 @@ try {
   execFileSync(process.execPath, [join(consumer, "smoke.js")], { cwd: consumer, stdio: "pipe" });
 
   writeFileSync(
+    join(consumer, "retry-body.js"),
+    `
+      import assert from "node:assert/strict";
+      import { createFetch, json, text } from "@askrjs/fetch";
+      import { retry } from "@askrjs/fetch/middleware";
+
+      const bodies = [];
+      const result = await createFetch({
+        middleware: [retry({ attempts: 2, delay: () => 0 })],
+        fetch: async (request) => {
+          bodies.push(await request.text());
+          return new Response(bodies.length === 1 ? "retry" : "ok", {
+            status: bodies.length === 1 ? 503 : 200,
+            headers: { "content-type": "text/plain", "retry-after": "0" },
+          });
+        },
+      })({
+        url: "https://example.test/items/1",
+        method: "PUT",
+        headers: { "x-request": "installed" },
+        body: { name: "updated" },
+        bodyCodec: json(),
+        response: text(),
+        errors: { 503: text() },
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(bodies, ['{"name":"updated"}', '{"name":"updated"}']);
+    `,
+  );
+  execFileSync(process.execPath, [join(consumer, "retry-body.js")], {
+    cwd: consumer,
+    stdio: "pipe",
+  });
+
+  writeFileSync(
     join(consumer, "fixture.ts"),
     `
       import { createClient, defineApi, get, json } from "@askrjs/fetch";

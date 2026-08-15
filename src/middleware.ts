@@ -88,17 +88,27 @@ export interface RetryOptions {
   delay?: (attempt: number) => number;
 }
 /**
- * Middleware that retries failed requests. Retries only requests with an eligible
- * method and no body (since the body cannot be safely re-sent), on network failures
+ * Middleware that retries failed requests. Retries eligible methods on network failures
  * or eligible response statuses, honoring a `Retry-After` header when present and
- * stopping early if the request's deadline would be exceeded.
+ * stopping early if the request's deadline would be exceeded. A non-streaming request body
+ * is replayed only when it can be cloned before the first attempt; streaming, already-consumed,
+ * or otherwise non-cloneable bodies are sent once without retrying.
  */
 export function retry(options: RetryOptions = {}): Middleware {
   const attempts = options.attempts ?? 3;
   const methods = options.methods ?? ["GET", "HEAD", "PUT", "DELETE", "OPTIONS"];
   const statuses = options.statuses ?? [408, 425, 429, 500, 502, 503, 504];
   return async (context, next) => {
-    if (!methods.includes(context.request.method) || context.request.body) return next(context);
+    if (!methods.includes(context.request.method)) return next(context);
+    if (context.replayableBody === false) return next(context);
+    let replayable: Request | undefined;
+    if (context.request.body) {
+      try {
+        replayable = context.request.clone();
+      } catch {
+        return next(context);
+      }
+    }
     let result: FetchResult = await next(context);
     for (
       let attempt = 2;
@@ -136,7 +146,13 @@ export function retry(options: RetryOptions = {}): Middleware {
           headers: new Headers(),
           url: context.request.url,
         };
-      result = await next(Object.freeze({ ...context, attempt, request: context.request.clone() }));
+      let request: Request;
+      try {
+        request = (replayable ?? context.request).clone();
+      } catch {
+        break;
+      }
+      result = await next(Object.freeze({ ...context, attempt, request }));
     }
     return result;
   };

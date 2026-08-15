@@ -136,6 +136,8 @@ export interface RequestContext {
   readonly security?: AnyEndpointDescriptor["security"];
   /** 1 on the first attempt, incremented by middleware (e.g. {@link retry}) on subsequent attempts. */
   readonly attempt: number;
+  /** Whether a body was encoded from a replayable value; streaming bodies set this to `false`. */
+  readonly replayableBody?: boolean;
   /** Absolute timestamp (ms since epoch) by which the request must complete, if a timeout is set. */
   readonly deadline?: number;
 }
