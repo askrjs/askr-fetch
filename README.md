@@ -108,6 +108,10 @@ get("/search")
   .returns(json());
 ```
 
+Query serialization treats `null` as the literal `null` and `NaN` as the literal `NaN`, whether
+the value is scalar or array-wrapped. `undefined` is omitted in both positions. This avoids
+silently turning scalar `null` into an empty string or array-wrapped `undefined` into text.
+
 ## Middleware
 
 Import middleware from the dedicated subpath:
