@@ -80,12 +80,11 @@ describe("fetch contracts", () => {
     });
   });
   it("should distinguish timeout from caller abort given cancellation when executing", async () => {
-    const hanging = async (_request: Request) =>
-      new Promise<Response>((_, reject) => {
-        const onAbort = () => reject(_request.signal.reason);
-        _request.signal.addEventListener("abort", onAbort, { once: true });
-        if (_request.signal.aborted) onAbort();
-      });
+    const hanging = async (request: Request) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (request.signal.aborted) throw request.signal.reason;
+      throw new Error("transport did not observe cancellation");
+    };
     expect(
       await createFetch({ fetch: hanging, timeout: 5 })({
         url: "https://x.test",
