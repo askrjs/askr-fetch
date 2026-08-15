@@ -9,6 +9,12 @@ import type {
 } from "./types";
 
 const PATH_NAME = /^[A-Za-z_$][\w$]*$/;
+/**
+ * Extracts the ordered list of `{param}` placeholder names from an endpoint path.
+ *
+ * @throws {TypeError} If the path uses colon/wildcard syntax, has malformed
+ * `{...}` placeholders, or contains a duplicate parameter name.
+ */
 export function pathNames(path: string): string[] {
   if (path.includes(":") || path.includes("*")) throw new TypeError(`Invalid path syntax: ${path}`);
   const names: string[] = [];
@@ -32,6 +38,12 @@ type State = Omit<EndpointDescriptor, "responses" | "errors"> & {
   errors: Errors;
 };
 const STATE = Symbol("endpoint-state");
+/**
+ * Fluent, immutable builder for describing a single endpoint's params, query,
+ * headers, body, responses, errors, and security requirements. Each method
+ * returns a new builder reflecting the added configuration; the accumulated
+ * state is finalized into an {@link EndpointDescriptor} by {@link defineApi}.
+ */
 export interface EndpointBuilder<
   P = undefined,
   Q = undefined,
@@ -120,12 +132,19 @@ const method = (value: HttpMethod) => (path: string) => {
     errors: {},
   });
 };
+/** Starts building a GET endpoint at the given path. */
 export const get = method("GET");
+/** Starts building a POST endpoint at the given path. */
 export const post = method("POST");
+/** Starts building a PUT endpoint at the given path. */
 export const put = method("PUT");
+/** Starts building a PATCH endpoint at the given path. */
 export const patch = method("PATCH");
+/** Starts building a DELETE endpoint at the given path. */
 export const del = method("DELETE");
+/** Starts building a HEAD endpoint at the given path. */
 export const head = method("HEAD");
+/** Starts building an OPTIONS endpoint at the given path. */
 export const options = method("OPTIONS");
 type DescriptorOf<T> =
   T extends EndpointBuilder<infer P, infer Q, infer H, infer B, infer R, infer E>
@@ -181,6 +200,16 @@ const snapshotMetadata = (metadata: ApiMetadata): ApiMetadata =>
       ? { securitySchemes: Object.freeze({ ...metadata.securitySchemes }) }
       : {}),
   });
+/**
+ * Finalizes a map of {@link EndpointBuilder}s and/or raw {@link EndpointDescriptor}s into
+ * a frozen {@link ApiDefinition}, stamping each endpoint's `operationId` from its key and
+ * deep-freezing its parameters, security, responses, and errors.
+ *
+ * @example
+ * const api = defineApi({
+ *   getUser: get("/users/{id}").returns(json()),
+ * });
+ */
 export function defineApi<E extends Record<string, AnyEndpointDescriptor | EndpointBuilder>>(
   endpoints: E,
   metadata?: ApiMetadata,

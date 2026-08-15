@@ -28,6 +28,10 @@ const replaceHeaders = (
   mutate(headers);
   return Object.freeze({ ...context, request: new Request(context.request, { headers }) });
 };
+/**
+ * Middleware that attaches an `Authorization: Bearer <token>` header to every request.
+ * `token` may be a static string or a (possibly async) function resolved on each request.
+ */
 export const bearerAuth =
   ({ token }: { token: string | (() => string | Promise<string>) }): Middleware =>
   async (context, next) => {
@@ -36,6 +40,12 @@ export const bearerAuth =
       replaceHeaders(context, (headers) => headers.set("authorization", `Bearer ${resolved}`)),
     );
   };
+/**
+ * Middleware that attaches an API key to every request, either as a header or a query
+ * parameter (`in`, default `"header"`). `value` may be a static string or a (possibly
+ * async) function resolved on each request. The key is marked sensitive so the
+ * {@link logging} middleware redacts it.
+ */
 export function apiKeyAuth({
   key,
   value,
@@ -66,12 +76,23 @@ export function apiKeyAuth({
     );
   };
 }
+/** Options controlling the {@link retry} middleware's behavior. */
 export interface RetryOptions {
+  /** Maximum number of attempts, including the first. Defaults to 3. */
   attempts?: number;
+  /** HTTP methods eligible for retry. Defaults to idempotent-by-convention methods. */
   methods?: readonly string[];
+  /** Response statuses that trigger a retry. Defaults to common transient failure codes. */
   statuses?: readonly number[];
+  /** Computes the delay (ms) before the given retry attempt, if no `Retry-After` header is present. */
   delay?: (attempt: number) => number;
 }
+/**
+ * Middleware that retries failed requests. Retries only requests with an eligible
+ * method and no body (since the body cannot be safely re-sent), on network failures
+ * or eligible response statuses, honoring a `Retry-After` header when present and
+ * stopping early if the request's deadline would be exceeded.
+ */
 export function retry(options: RetryOptions = {}): Middleware {
   const attempts = options.attempts ?? 3;
   const methods = options.methods ?? ["GET", "HEAD", "PUT", "DELETE", "OPTIONS"];
@@ -139,6 +160,12 @@ const redactedUrl = (value: string, names: readonly string[] = []): string => {
     }
   return url.toString();
 };
+/**
+ * Middleware that logs a `"request"` event before and a `"response"` event after each
+ * request, via the given logger (defaults to `console`). Headers and query parameters
+ * marked sensitive (e.g. by {@link apiKeyAuth}) or matching common sensitive-name
+ * patterns (authorization, cookie, token, secret, password, api key) are redacted.
+ */
 export function logging(
   logger: { log(event: Record<string, unknown>): void } = console,
 ): Middleware {
@@ -163,11 +190,19 @@ export function logging(
     return result;
   };
 }
+/** Hooks invoked by the {@link telemetry} middleware around each request. */
 export interface TelemetryHooks {
+  /** Called before the request proceeds; its return value (a "span") is passed to `end`/`error`. */
   start?(context: RequestContext): unknown;
+  /** Called after the request completes successfully (from this middleware's perspective). */
   end?(span: unknown, result: FetchResult): void;
+  /** Called if a downstream middleware or the transport throws. */
   error?(span: unknown, error: unknown): void;
 }
+/**
+ * Middleware that wraps each request with {@link TelemetryHooks}, calling `start` before
+ * the request, `end` after it completes, and `error` (then rethrowing) if it throws.
+ */
 export function telemetry(hooks: TelemetryHooks): Middleware {
   return async (context, next) => {
     const span = hooks.start?.(context);
