@@ -211,6 +211,7 @@ const parameterValue = (map: ParameterMap | undefined, name: string, value: unkn
   return parsed.data;
 };
 
+/** A one-off, untyped request description accepted by {@link createFetch}'s returned function. */
 export interface AdHocCall {
   url: string;
   method?: string;
@@ -227,6 +228,12 @@ export interface AdHocCall {
   endpoint?: EndpointDescriptor;
   operationId?: string;
 }
+/**
+ * Creates a low-level fetch function that builds a `Request` from an {@link AdHocCall},
+ * runs it through the configured middleware chain, and decodes the response with the
+ * matching codec. Used internally by {@link createClient}, and usable directly for
+ * requests without a full {@link EndpointDescriptor}.
+ */
 export function createFetch(options: ClientOptions = {}) {
   return async (call: AdHocCall): Promise<FetchResult> => {
     let url = `${options.baseUrl?.replace(/\/$/, "") ?? ""}${call.url}`;
@@ -400,6 +407,7 @@ type Errors<D> =
             ? HttpResult<InferCodec<NonNullable<E["default"]>>, number>
             : never)
     : never;
+/** The possible results of calling a typed client method for endpoint descriptor `D`. */
 export type ClientResult<D extends AnyEndpointDescriptor> =
   | Successes<D>
   | Errors<D>
@@ -408,9 +416,15 @@ type ClientMethod<D extends AnyEndpointDescriptor> =
   RequiredKeys<EndpointInput<D>> extends never
     ? (input?: EndpointInput<D>) => Promise<ClientResult<D>>
     : (input: EndpointInput<D>) => Promise<ClientResult<D>>;
+/** A fully-typed client for an {@link ApiDefinition}, with one method per endpoint. */
 export type ApiClient<A extends ApiDefinition> = Readonly<{
   [K in keyof A["endpoints"]]: ClientMethod<A["endpoints"][K]>;
 }>;
+/**
+ * Builds a typed {@link ApiClient} from an {@link ApiDefinition}. Each endpoint becomes
+ * a method that fills in the path, query, header, and body parameters, executes the
+ * request via {@link createFetch}, and returns a {@link ClientResult}.
+ */
 export function createClient<A extends ApiDefinition>(
   api: A,
   options: ClientOptions = {},
@@ -478,12 +492,17 @@ export function createClient<A extends ApiDefinition>(
   ) as ApiClient<A>;
   return Object.freeze(methods);
 }
+/** An `Error` thrown by {@link unwrap} that wraps a failed (non-`ok`) {@link FetchResult}. */
 export class FetchError extends Error {
   constructor(readonly result: Exclude<FetchResult, { ok: true }>) {
     super(`Fetch failed: ${result.kind}`);
     this.name = "FetchError";
   }
 }
+/**
+ * Returns the data of a successful {@link FetchResult}, or throws a {@link FetchError}
+ * wrapping the result if it was not `ok`.
+ */
 export function unwrap<T>(result: FetchResult<T>): T {
   if (!result.ok) throw new FetchError(result);
   return result.data;
