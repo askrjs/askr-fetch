@@ -279,10 +279,7 @@ describe("fetch contracts", () => {
       expect(result).toMatchObject({ ok: true, data: "ok" });
       expect(transport).toHaveBeenCalledTimes(2);
       expect(bodies).toEqual(['{"name":"updated"}', '{"name":"updated"}']);
-      expect(headers).toEqual([
-        "application/json|preserved",
-        "application/json|preserved",
-      ]);
+      expect(headers).toEqual(["application/json|preserved", "application/json|preserved"]);
     },
   );
   it("should skip retries without throwing when an earlier middleware consumed the body", async () => {
