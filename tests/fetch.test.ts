@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   arrayBuffer,
@@ -186,6 +187,12 @@ describe("fetch contracts", () => {
     expect(spans).toEqual(["start", "end"]);
   });
   it("should refresh auth and observe each attempt given the README middleware order", async () => {
+    const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+    const documented = readme.match(/middleware:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+    expect(documented.indexOf("retry(")).toBeLessThan(documented.indexOf("bearerAuth("));
+    expect(documented.indexOf("bearerAuth(")).toBeLessThan(documented.indexOf("logging("));
+    expect(documented.indexOf("logging(")).toBeLessThan(documented.indexOf("telemetry("));
+
     const authorizations: (string | null)[] = [];
     const logs: Record<string, unknown>[] = [];
     const spans: string[] = [];

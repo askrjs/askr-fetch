@@ -165,6 +165,7 @@ function queryParameter(
   const explode = spec.explode ?? true;
   const object = entries(value).filter(([, item]) => item !== undefined);
   const array = Array.isArray(value);
+  const emptyArray = array && value.length === 0;
   const items = values(value)
     .filter((item) => item !== undefined)
     .map(String);
@@ -176,7 +177,8 @@ function queryParameter(
   }
   if (style === "spaceDelimited" || style === "pipeDelimited") {
     if (!array) throw new TypeError(`${style} query parameter ${name} must be an array`);
-    if (items.length) append(name, items.join(style === "spaceDelimited" ? " " : "|"));
+    if (items.length || emptyArray)
+      append(name, items.join(style === "spaceDelimited" ? " " : "|"));
     return;
   }
   if (style !== "form") throw new TypeError(`Unsupported query parameter style: ${style}`);
@@ -186,7 +188,7 @@ function queryParameter(
     return;
   }
   if (array && explode) for (const item of items) append(name, item);
-  else if (items.length) append(name, items.join(","));
+  else if (items.length || emptyArray) append(name, items.join(","));
 }
 function headerParameter(value: unknown, spec: ParameterSpec = {}): string {
   if ((spec.style ?? "simple") !== "simple")
