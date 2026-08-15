@@ -10,6 +10,7 @@ import {
   get,
   json,
   post,
+  stream,
   text,
 } from "../src";
 import { apiKeyAuth, bearerAuth, logging, retry, telemetry } from "../src/middleware";
@@ -304,6 +305,35 @@ describe("fetch contracts", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it("should send streaming bodies once without an incidental replay error", async () => {
+    const transport = vi.fn(async (request: Request) => {
+      await request.text();
+      return new Response("retry", {
+        status: 503,
+        headers: { "content-type": "text/plain", "retry-after": "0" },
+      });
+    });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("streamed"));
+        controller.close();
+      },
+    });
+    const result = await createFetch({
+      middleware: [retry({ attempts: 2, delay: () => 0 })],
+      fetch: transport,
+    })({
+      url: "https://x.test/resource",
+      method: "PUT",
+      body,
+      bodyCodec: stream(),
+      response: text(),
+      errors: { 503: text() },
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: "http", status: 503 });
     expect(transport).toHaveBeenCalledTimes(1);
   });
   it("should freeze builders clients and descriptors given an API when constructed", () => {
