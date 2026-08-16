@@ -159,6 +159,27 @@ describe("fetch contracts", () => {
     })({ url: "https://x.test", response: text() });
     expect(events).toEqual(["a:in", "b:in", "b:out", "a:out"]);
   });
+  it("should report downstream middleware exceptions to telemetry before converting them", async () => {
+    const events: string[] = [];
+    const execute = createFetch({
+      middleware: [
+        telemetry({
+          start: () => events.push("start"),
+          end: () => events.push("end"),
+          error: () => events.push("error"),
+        }),
+        async () => {
+          throw new Error("downstream exploded");
+        },
+      ],
+    });
+
+    await expect(execute({ url: "https://x.test", response: text() })).resolves.toMatchObject({
+      ok: false,
+      kind: "middleware",
+    });
+    expect(events).toEqual(["start", "error"]);
+  });
   it("should apply auth retry redaction and telemetry given polished middleware when executing", async () => {
     const logs: Record<string, unknown>[] = [];
     const spans: string[] = [];
