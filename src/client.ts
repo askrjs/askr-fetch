@@ -354,8 +354,9 @@ export function createFetch(options: ClientOptions = {}) {
     const dispatch = (index: number, context: RequestContext): Promise<FetchResult> =>
       index === middleware.length
         ? terminal(context)
-        : Promise.resolve()
-            .then(() => middleware[index]!(context, (next = context) => dispatch(index + 1, next)));
+        : Promise.resolve().then(() =>
+            middleware[index]!(context, (next = context) => dispatch(index + 1, next)),
+          );
     try {
       return await dispatch(
         0,
