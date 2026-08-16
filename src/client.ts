@@ -354,9 +354,9 @@ export function createFetch(options: ClientOptions = {}) {
     const dispatch = (index: number, context: RequestContext): Promise<FetchResult> =>
       index === middleware.length
         ? terminal(context)
-        : Promise.resolve()
-            .then(() => middleware[index]!(context, (next = context) => dispatch(index + 1, next)))
-            .catch((error) => failure("middleware", error, url));
+        : Promise.resolve().then(() =>
+            middleware[index]!(context, (next = context) => dispatch(index + 1, next)),
+          );
     try {
       return await dispatch(
         0,
@@ -370,6 +370,8 @@ export function createFetch(options: ClientOptions = {}) {
           ...(timeout === undefined ? {} : { deadline: Date.now() + timeout }),
         }),
       );
+    } catch (error) {
+      return failure("middleware", error, url);
     } finally {
       cleanup();
     }
