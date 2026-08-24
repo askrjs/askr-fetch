@@ -86,6 +86,8 @@ export interface RetryOptions {
   statuses?: readonly number[];
   /** Computes the delay (ms) before the given retry attempt, if no `Retry-After` header is present. */
   delay?: (attempt: number) => number;
+  /** Maximum delay (ms) accepted from `Retry-After`. Defaults to 60 seconds. */
+  maxRetryAfter?: number;
 }
 /**
  * Middleware that retries failed requests. Retries eligible methods on network failures
@@ -98,6 +100,9 @@ export function retry(options: RetryOptions = {}): Middleware {
   const attempts = options.attempts ?? 3;
   const methods = options.methods ?? ["GET", "HEAD", "PUT", "DELETE", "OPTIONS"];
   const statuses = options.statuses ?? [408, 425, 429, 500, 502, 503, 504];
+  const maxRetryAfter = options.maxRetryAfter ?? 60_000;
+  if (!Number.isFinite(maxRetryAfter) || maxRetryAfter < 0)
+    throw new TypeError("maxRetryAfter must be a non-negative finite number");
   return async (context, next) => {
     if (!methods.includes(context.request.method)) return next(context);
     if (context.replayableBody === false) return next(context);
@@ -119,12 +124,17 @@ export function retry(options: RetryOptions = {}): Middleware {
       attempt++
     ) {
       const retryAfter = "response" in result ? result.response?.headers.get("retry-after") : null;
-      const wait = retryAfter
+      const fallback = () => options.delay?.(attempt) ?? 100 * 2 ** (attempt - 2);
+      const parsedRetryAfter = retryAfter
         ? /^\d+$/.test(retryAfter)
           ? Number(retryAfter) * 1000
           : Math.max(0, Date.parse(retryAfter) - Date.now())
-        : (options.delay?.(attempt) ?? 100 * 2 ** (attempt - 2));
-      if (context.deadline && Date.now() + wait >= context.deadline) break;
+        : undefined;
+      const wait =
+        parsedRetryAfter === undefined || !Number.isFinite(parsedRetryAfter)
+          ? fallback()
+          : Math.min(parsedRetryAfter, maxRetryAfter);
+      if (context.deadline !== undefined && Date.now() + wait >= context.deadline) break;
       const ready = await new Promise<boolean>((resolve) => {
         const onAbort = () => {
           clearTimeout(timer);
