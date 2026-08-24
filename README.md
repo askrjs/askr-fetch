@@ -46,6 +46,12 @@ if (result.ok) {
 Paths use OpenAPI-style `{name}` parameters. Colon parameters and wildcards are rejected. A path
 parameter declaration must exactly match the names in the path.
 
+Path values are runtime-validated or transformed only when their `.params()` entry includes a
+validator. The generic in `.params<T>()` is a compile-time contract and is erased at runtime; using
+`.params<T>()` without validators, or relying on auto-derived path parameters, only checks that
+required names are present. Supply a validator for every path value when runtime safety or coercion
+is required.
+
 Every call returns a discriminated result instead of throwing for request, transport, HTTP, or
 decode failures. Use `unwrap(result)` when exception-based control flow is more convenient.
 
