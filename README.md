@@ -63,6 +63,20 @@ The built-in codecs are:
 - `empty()`
 - `content({ mediaType: codec })`
 
+For outbound bodies with more than one `content()` variant, pass
+`bodyMediaType` explicitly. Single-variant codecs select their only variant
+automatically:
+
+```ts
+await client.createDocument({
+  body: "plain text",
+  bodyMediaType: "text/plain",
+});
+```
+
+An omitted or unknown media type produces a `request` failure, so declaration
+order never selects a multi-variant request format.
+
 A validator only needs a `safeParse(value)` method, so schema libraries with that contract can be
 used without an adapter. Validators run for request bodies, path parameters, query parameters,
 headers, and decoded response bodies. Successful validator transformations are used for
