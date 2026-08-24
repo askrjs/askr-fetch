@@ -153,10 +153,12 @@ sequence is intentional. Logging redacts common credential names as well as arbi
 query names added by `apiKeyAuth()`.
 
 Retries default to `GET`, `HEAD`, `PUT`, `DELETE`, and `OPTIONS`, and to statuses `408`, `425`,
-`429`, `500`, `502`, `503`, and `504`. `Retry-After` is honored when present. Cloneable request
-bodies are replayed with the original bytes and headers. `ReadableStream` bodies are explicitly
-single-attempt so retry does not buffer an unbounded stream. If an earlier middleware has already
-consumed any body, retry also sends it once and does not surface an incidental cloning error.
+`429`, `500`, `502`, `503`, and `504`. Valid `Retry-After` values are honored up to
+`maxRetryAfter` (60 seconds by default); malformed values use the normal backoff. Cloneable
+request bodies are replayed with the original bytes and headers. `ReadableStream` bodies are
+explicitly single-attempt so retry does not buffer an unbounded stream. If an earlier middleware
+has already consumed any body, retry also sends it once and does not surface an incidental cloning
+error.
 
 Do not include a status such as `401` in `retry()` when an upstream authentication middleware
 already handles that status. The outer authentication layer cannot react until retry's complete

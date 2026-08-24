@@ -324,6 +324,50 @@ describe("fetch contracts", () => {
     expect(result).toMatchObject({ ok: true, data: "ok" });
     expect(transport).toHaveBeenCalledTimes(2);
   });
+  it("should validate and clamp Retry-After before enforcing the deadline", async () => {
+    const exercise = async (
+      retryAfter: string,
+      retryOptions: Parameters<typeof retry>[0],
+      timeout?: number,
+    ) => {
+      const transport = vi
+        .fn<(request: Request) => Promise<Response>>()
+        .mockResolvedValueOnce(
+          new Response("later", {
+            status: 429,
+            headers: { "content-type": "text/plain", "retry-after": retryAfter },
+          }),
+        )
+        .mockResolvedValue(new Response("ok", { headers: { "content-type": "text/plain" } }));
+      const result = await createFetch({
+        middleware: [retry(retryOptions)],
+        fetch: transport,
+        ...(timeout === undefined ? {} : { timeout }),
+      })({ url: "https://x.test", response: text(), errors: { 429: text() } });
+      return { result, transport };
+    };
+
+    const fallback = vi.fn(() => 1_000);
+    const malformed = await exercise("not-a-real-date", { attempts: 2, delay: fallback }, 5);
+    expect(fallback).toHaveBeenCalledWith(2);
+    expect(malformed.transport).toHaveBeenCalledTimes(1);
+
+    const clamped = await exercise(
+      "Fri, 31 Dec 9999 23:59:59 GMT",
+      {
+        attempts: 2,
+        maxRetryAfter: 0,
+      },
+      5,
+    );
+    expect(clamped.result).toMatchObject({ ok: true });
+    expect(clamped.transport).toHaveBeenCalledTimes(2);
+
+    const valid = await exercise("0", { attempts: 2, delay: () => 1_000 });
+    expect(valid.result).toMatchObject({ ok: true });
+    expect(valid.transport).toHaveBeenCalledTimes(2);
+    expect(() => retry({ maxRetryAfter: Number.NaN })).toThrow(/non-negative finite number/);
+  });
   it.each(["status", "network"] as const)(
     "should retry replayable PUT bodies after a %s failure",
     async (failure) => {
