@@ -145,6 +145,56 @@ describe("fetch contracts", () => {
     });
     expect(contentType).toBe("application/problem+json");
   });
+  it("should explicitly select a request content variant independent of declaration order", async () => {
+    const requests: Array<{ contentType: string | null; body: string }> = [];
+    const transport = async (request: Request) => {
+      requests.push({
+        contentType: request.headers.get("content-type"),
+        body: await request.text(),
+      });
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    };
+    const variants = [
+      content({ "application/json": json(), "text/plain": text() }),
+      content({ "text/plain": text(), "application/json": json() }),
+    ];
+
+    for (const bodyCodec of variants) {
+      const client = createClient(
+        defineApi({ createDocument: post("/documents").body(bodyCodec).returns(text()) }),
+        { baseUrl: "https://x.test", fetch: transport },
+      );
+      await client.createDocument({
+        body: "plain body",
+        bodyMediaType: "text/plain",
+      });
+    }
+
+    expect(requests).toEqual([
+      { contentType: "text/plain", body: "plain body" },
+      { contentType: "text/plain", body: "plain body" },
+    ]);
+
+    const ambiguous = await createFetch({ fetch: transport })({
+      url: "https://x.test",
+      method: "POST",
+      body: "plain body",
+      bodyCodec: variants[0],
+      response: text(),
+    });
+    expect(ambiguous).toMatchObject({ ok: false, kind: "request" });
+
+    const unknown = await createFetch({ fetch: transport })({
+      url: "https://x.test",
+      method: "POST",
+      body: "plain body",
+      bodyCodec: variants[0],
+      bodyMediaType: "application/xml",
+      response: text(),
+    });
+    expect(unknown).toMatchObject({ ok: false, kind: "request" });
+    expect(requests).toHaveLength(2);
+  });
   it("should execute middleware outward given declaration order when responding", async () => {
     const events: string[] = [];
     const layer = (name: string) => async (context: any, next: any) => {

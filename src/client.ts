@@ -73,7 +73,12 @@ async function decode(response: Response, codec: Codec): Promise<unknown> {
   }
   return value;
 }
-function encode(value: unknown, codec: Codec, headers: Headers): BodyInit | undefined {
+function encode(
+  value: unknown,
+  codec: Codec,
+  headers: Headers,
+  requestedMediaType?: string,
+): BodyInit | undefined {
   if (codec.validator) {
     const parsed = codec.validator.safeParse(value);
     if (!parsed.success) throw parsed.error;
@@ -98,10 +103,20 @@ function encode(value: unknown, codec: Codec, headers: Headers): BodyInit | unde
     case "stream":
       return value as BodyInit;
     case "content": {
-      const [type, selected] = Object.entries(codec.variants ?? {})[0] ?? [];
-      if (!selected) throw new TypeError("content() has no variants");
+      const variants = Object.entries(codec.variants ?? {});
+      if (variants.length === 0) throw new TypeError("content() has no variants");
+      const type = requestedMediaType?.split(";", 1)[0]?.trim().toLowerCase();
+      const [selectedType, selected] = type
+        ? ([type, codec.variants?.[type]] as const)
+        : variants.length === 1
+          ? variants[0]!
+          : [];
+      if (type && !selected)
+        throw new TypeError(`No content() request variant for media type ${type}`);
+      if (!selected)
+        throw new TypeError("Multi-variant content() request bodies require bodyMediaType");
       const body = encode(value, selected, headers);
-      if (selected.kind !== "multipart") headers.set("content-type", type);
+      if (selected.kind !== "multipart") headers.set("content-type", selectedType!);
       return body;
     }
   }
@@ -225,6 +240,8 @@ export interface AdHocCall {
   querySpec?: ParameterMap;
   body?: unknown;
   bodyCodec?: Codec;
+  /** Explicit media type used to encode a request body with a multi-variant `content()` codec. */
+  bodyMediaType?: string;
   response?: Codec;
   responses?: Readonly<Record<number, Codec>>;
   errors?: Partial<Record<number | "default", Codec>>;
@@ -263,7 +280,7 @@ export function createFetch(options: ClientOptions = {}) {
     }
     let body: BodyInit | undefined;
     try {
-      if (call.bodyCodec) body = encode(call.body, call.bodyCodec, headers);
+      if (call.bodyCodec) body = encode(call.body, call.bodyCodec, headers, call.bodyMediaType);
     } catch (error) {
       return failure("request", error, url);
     }
@@ -397,7 +414,11 @@ type EndpointInput<D extends AnyEndpointDescriptor> = Container<
 > &
   Container<"query", InputParts<D>["query"]> &
   Container<"headers", InputParts<D>["headers"]> &
-  Container<"body", InputParts<D>["body"], true> & { signal?: AbortSignal; timeout?: number };
+  Container<"body", InputParts<D>["body"], true> & {
+    bodyMediaType?: string;
+    signal?: AbortSignal;
+    timeout?: number;
+  };
 type Successes<D> =
   D extends EndpointDescriptor<any, any, any, any, infer R, any>
     ? { [S in keyof R & number]: SuccessResult<InferCodec<R[S]>, S> }[keyof R & number]
@@ -488,6 +509,7 @@ export function createClient<A extends ApiDefinition>(
           querySpec: endpoint.query,
           body: input.body,
           bodyCodec: endpoint.body,
+          bodyMediaType: input.bodyMediaType,
           responses: endpoint.responses,
           errors: endpoint.errors,
           signal: input.signal,
