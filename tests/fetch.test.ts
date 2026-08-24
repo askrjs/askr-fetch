@@ -2,17 +2,29 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   arrayBuffer,
+  blob,
   content,
   createClient,
   createFetch,
   defineApi,
   del,
   empty,
+  FetchError,
   get,
+  head,
   json,
+  multipart,
+  options,
+  patch,
+  pathNames,
   post,
+  put,
   stream,
   text,
+  unwrap,
+  urlEncoded,
+  type Codec,
+  type Middleware,
 } from "../src";
 import { apiKeyAuth, bearerAuth, logging, retry, telemetry } from "../src/middleware";
 
@@ -127,6 +139,82 @@ describe("fetch contracts", () => {
     expect(result.ok && [...new Uint8Array(result.data as ArrayBuffer)]).toEqual([1, 2]);
     expect(() => del("/x").returns(204, json())).toThrow();
     expect(del("/x").returns(204, empty())).toBeDefined();
+  });
+  it("should round-trip every body codec through Fetch request and response objects", async () => {
+    const roundTrip = async (body: unknown, bodyCodec: Codec) =>
+      createFetch({
+        fetch: async (request) => {
+          const headers = new Headers();
+          const contentType = request.headers.get("content-type");
+          if (contentType) headers.set("content-type", contentType);
+          return new Response(await request.arrayBuffer(), { headers });
+        },
+      })({
+        url: "https://x.test",
+        method: "POST",
+        body,
+        bodyCodec,
+        response: bodyCodec,
+      });
+
+    await expect(roundTrip({ value: null }, json())).resolves.toMatchObject({
+      ok: true,
+      data: { value: null },
+    });
+    await expect(roundTrip("", text())).resolves.toMatchObject({ ok: true, data: "" });
+    const parameters = new URLSearchParams({ value: "a b" });
+    const encoded = await roundTrip(parameters, urlEncoded());
+    expect(encoded.ok && (encoded.data as URLSearchParams).get("value")).toBe("a b");
+
+    const form = new FormData();
+    form.set("value", "multipart");
+    const multipartResult = await roundTrip(form, multipart());
+    expect(multipartResult.ok && (multipartResult.data as FormData).get("value")).toBe("multipart");
+
+    const blobResult = await roundTrip(new Blob(["blob"]), blob());
+    expect(blobResult.ok && (await (blobResult.data as Blob).text())).toBe("blob");
+    const bufferResult = await roundTrip(new Uint8Array([1, 2]).buffer, arrayBuffer());
+    expect(bufferResult.ok && [...new Uint8Array(bufferResult.data as ArrayBuffer)]).toEqual([
+      1, 2,
+    ]);
+
+    const streamed = await createFetch({
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.enqueue(new TextEncoder().encode("chunk"));
+              controller.close();
+            },
+          }),
+          { headers: { "content-type": "application/octet-stream" } },
+        ),
+    })({ url: "https://x.test", response: stream() });
+    expect(streamed.ok && streamed.data).toBeInstanceOf(ReadableStream);
+
+    const noContent = await createFetch({ fetch: async () => new Response(null, { status: 204 }) })(
+      {
+        url: "https://x.test",
+        response: empty(),
+      },
+    );
+    expect(noContent).toMatchObject({ ok: true, data: undefined });
+
+    const negotiated = await createFetch({
+      fetch: async () => new Response("negotiated", { headers: { "content-type": "text/plain" } }),
+    })({
+      url: "https://x.test",
+      response: content({ "application/json": json(), "text/plain": text() }),
+    });
+    expect(negotiated).toMatchObject({ ok: true, data: "negotiated" });
+  });
+  it("should directly expose every HTTP builder, path parser, and unwrap outcome", async () => {
+    expect(pathNames("/items/{id}/{part}")).toEqual(["id", "part"]);
+    expect(patch("/x").returns(text())).toBeDefined();
+    expect(head("/x").returns(200, empty())).toBeDefined();
+    expect(options("/x").returns(text())).toBeDefined();
+    expect(unwrap({ ok: true, kind: "success", status: 200, data: "ok" } as never)).toBe("ok");
+    expect(() => unwrap({ ok: false, kind: "network" } as never)).toThrow(FetchError);
   });
   it("should preserve a declared request media type given a content codec when encoding", async () => {
     let contentType: string | null = null;
@@ -368,45 +456,127 @@ describe("fetch contracts", () => {
     expect(valid.transport).toHaveBeenCalledTimes(2);
     expect(() => retry({ maxRetryAfter: Number.NaN })).toThrow(/non-negative finite number/);
   });
-  it.each(["status", "network"] as const)(
-    "should retry replayable PUT bodies after a %s failure",
-    async (failure) => {
-      const bodies: string[] = [];
-      const headers: string[] = [];
-      const transport = vi.fn(async (request: Request) => {
-        bodies.push(await request.text());
-        headers.push(`${request.headers.get("content-type")}|${request.headers.get("x-request")}`);
-        if (bodies.length === 1) {
-          if (failure === "network") throw new Error("offline");
-          return new Response("retry", {
-            status: 503,
-            headers: { "content-type": "text/plain", "retry-after": "0" },
+  it("should isolate retries, content variants, and middleware state across concurrent calls", async () => {
+    const count = 20;
+    const attempts = new Map<string, number[]>();
+    const requests = new Map<string, Array<{ body: string; contentType: string | null }>>();
+    let firstAttempts = 0;
+    let releaseFirstAttempts!: () => void;
+    const firstAttemptGate = new Promise<void>((resolve) => {
+      releaseFirstAttempts = resolve;
+    });
+    const observe: Middleware = async (context, next) => {
+      const id = context.request.headers.get("x-request-id")!;
+      attempts.set(id, [...(attempts.get(id) ?? []), context.attempt]);
+      return next(context);
+    };
+    const client = createClient(
+      defineApi({
+        replaceDocument: put("/documents/{id}")
+          .params<{ id: string }>()
+          .headers<{ "x-request-id": string }>()
+          .body(content({ "application/json": json(), "text/plain": text() }))
+          .returns(text())
+          .errors({ 503: text() }),
+      }),
+      {
+        baseUrl: "https://x.test",
+        middleware: [retry({ attempts: 2, delay: () => 0 }), observe],
+        fetch: async (request) => {
+          const id = request.headers.get("x-request-id")!;
+          const seen = requests.get(id) ?? [];
+          seen.push({
+            body: await request.text(),
+            contentType: request.headers.get("content-type"),
           });
-        }
-        return new Response("ok", { headers: { "content-type": "text/plain" } });
-      });
-      const result = await createFetch({
-        middleware: [retry({ attempts: 2, delay: () => 0 })],
-        fetch: transport,
-      })({
-        url: "https://x.test/resource",
-        method: "PUT",
-        headers: { "x-request": "preserved" },
-        body: { name: "updated" },
-        bodyCodec: json(),
-        response: text(),
-        errors: { 503: text() },
-      });
+          requests.set(id, seen);
+          if (seen.length === 1) {
+            firstAttempts += 1;
+            if (firstAttempts === count) releaseFirstAttempts();
+            await firstAttemptGate;
+            return new Response("later", {
+              status: 503,
+              headers: { "content-type": "text/plain", "retry-after": "0" },
+            });
+          }
+          return new Response(id, { headers: { "content-type": "text/plain" } });
+        },
+      },
+    );
 
-      expect(result).toMatchObject({ ok: true, data: "ok" });
-      expect(transport).toHaveBeenCalledTimes(2);
-      expect(bodies).toEqual(['{"name":"updated"}', '{"name":"updated"}']);
-      expect(headers).toEqual(["application/json|preserved", "application/json|preserved"]);
-    },
-  );
+    const results = await Promise.all(
+      Array.from({ length: count }, (_, index) => {
+        const id = String(index);
+        const asJson = index % 2 === 0;
+        return client.replaceDocument({
+          params: { id },
+          headers: { "x-request-id": id },
+          body: asJson ? { id } : `document-${id}`,
+          bodyMediaType: asJson ? "application/json" : "text/plain",
+          timeout: 5_000,
+        });
+      }),
+    );
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    for (let index = 0; index < count; index += 1) {
+      const id = String(index);
+      const asJson = index % 2 === 0;
+      expect(attempts.get(id)).toEqual([1, 2]);
+      expect(requests.get(id)).toEqual([
+        {
+          body: asJson ? JSON.stringify({ id }) : `document-${id}`,
+          contentType: asJson ? "application/json" : "text/plain",
+        },
+        {
+          body: asJson ? JSON.stringify({ id }) : `document-${id}`,
+          contentType: asJson ? "application/json" : "text/plain",
+        },
+      ]);
+    }
+  });
+  it.each([
+    ["PUT", "status"],
+    ["PUT", "network"],
+    ["DELETE", "status"],
+    ["DELETE", "network"],
+  ] as const)("should retry replayable %s bodies after a %s failure", async (method, failure) => {
+    const bodies: string[] = [];
+    const headers: string[] = [];
+    const transport = vi.fn(async (request: Request) => {
+      bodies.push(await request.text());
+      headers.push(`${request.headers.get("content-type")}|${request.headers.get("x-request")}`);
+      if (bodies.length === 1) {
+        if (failure === "network") throw new Error("offline");
+        return new Response("retry", {
+          status: 503,
+          headers: { "content-type": "text/plain", "retry-after": "0" },
+        });
+      }
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    });
+    const result = await createFetch({
+      middleware: [retry({ attempts: 2, delay: () => 0 })],
+      fetch: transport,
+    })({
+      url: "https://x.test/resource",
+      method,
+      headers: { "x-request": "preserved" },
+      body: { name: "updated" },
+      bodyCodec: json(),
+      response: text(),
+      errors: { 503: text() },
+    });
+
+    expect(result).toMatchObject({ ok: true, data: "ok" });
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(bodies).toEqual(['{"name":"updated"}', '{"name":"updated"}']);
+    expect(headers).toEqual(["application/json|preserved", "application/json|preserved"]);
+  });
   it.each([
     ["a non-eligible POST", { method: "POST", timeout: undefined, delay: 0 }],
     ["an exhausted deadline", { method: "PUT", timeout: 5, delay: 1_000 }],
+    ["the exact deadline boundary", { method: "PUT", timeout: 1_000, delay: 1_000 }],
   ] as const)("should preserve one attempt for %s", async (_label, options) => {
     const transport = vi.fn(async (request: Request) => {
       await request.text();
@@ -575,12 +745,14 @@ describe("fetch contracts", () => {
         arrayUndefined: [undefined],
         scalarNaN: Number.NaN,
         arrayNaN: [Number.NaN],
+        mixed: [null, true, false, 0, "", Number.NaN],
+        nested: { nullable: null, truthy: true, zero: 0, empty: "" },
       },
       response: text(),
     });
 
     expect(request?.url).toBe(
-      "https://example.test/search?scalarNull=null&arrayNull=null&scalarNaN=NaN&arrayNaN=NaN",
+      "https://example.test/search?scalarNull=null&arrayNull=null&scalarNaN=NaN&arrayNaN=NaN&mixed=null&mixed=true&mixed=false&mixed=0&mixed=&mixed=NaN&nullable=null&truthy=true&zero=0&empty=",
     );
   });
   it("should validate and transform parameters given validators when calling", async () => {

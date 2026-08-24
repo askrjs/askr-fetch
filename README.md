@@ -5,7 +5,7 @@
 
 Function-first HTTP contracts, typed clients, codecs, and middleware for Askr. The package is
 ESM-only, has no runtime dependencies, and works with the standard Fetch APIs in modern browsers
-and Node.js 20.19 or newer.
+and Node.js 24 or newer.
 
 ## Install
 
