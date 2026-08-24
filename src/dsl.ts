@@ -53,6 +53,10 @@ export interface EndpointBuilder<
   E extends Errors = {},
 > {
   readonly [STATE]: State;
+  /**
+   * Declares path parameter types and optional runtime validators. Generic types are erased;
+   * runtime validation occurs only for entries whose specification includes a validator.
+   */
   params<T extends Record<string, unknown>>(spec?: ParameterMap): EndpointBuilder<T, Q, H, B, R, E>;
   query<T extends Record<string, unknown>>(spec?: ParameterMap): EndpointBuilder<P, T, H, B, R, E>;
   headers<T extends Record<string, unknown>>(
