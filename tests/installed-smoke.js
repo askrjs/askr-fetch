@@ -47,8 +47,9 @@ try {
     join(consumer, "smoke.js"),
     `
       import assert from "node:assert/strict";
-      import { createClient, defineApi, get, text } from "@askrjs/fetch";
+      import { createClient, createFetch, defineApi, get, json, text } from "@askrjs/fetch";
       import { bearerAuth } from "@askrjs/fetch/middleware";
+      import { schema } from "@askrjs/schema";
 
       const api = defineApi({ health: get("/health").returns(text()) });
       const client = createClient(api, {
@@ -64,6 +65,18 @@ try {
       assert.equal(result.kind, "success");
       assert.equal(result.data, "ok");
       assert.equal(result.url, "https://example.test/health");
+
+      const userSchema = schema.object({ id: schema.uuid() });
+      const invalidUser = { id: "not-a-uuid" };
+      const parsed = userSchema.safeParse(invalidUser);
+      assert.equal(parsed.success, false);
+      const invalid = await createFetch({
+        fetch: async () => new Response(JSON.stringify(invalidUser), {
+          headers: { "content-type": "application/json" },
+        }),
+      })({ url: "https://example.test/users/1", response: json(userSchema) });
+      assert.equal(invalid.kind, "decode");
+      assert.deepEqual(invalid.error, parsed.issues);
     `,
   );
   execFileSync(process.execPath, [join(consumer, "smoke.js")], { cwd: consumer, stdio: "pipe" });
