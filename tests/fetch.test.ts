@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { schema } from "@askrjs/schema";
 import { describe, expect, it, vi } from "vitest";
 import {
   arrayBuffer,
@@ -25,6 +26,7 @@ import {
   urlEncoded,
   type Codec,
   type Middleware,
+  type Validator,
 } from "../src";
 import { apiKeyAuth, bearerAuth, logging, retry, telemetry } from "../src/middleware";
 
@@ -139,6 +141,94 @@ describe("fetch contracts", () => {
     expect(result.ok && [...new Uint8Array(result.data as ArrayBuffer)]).toEqual([1, 2]);
     expect(() => del("/x").returns(204, json())).toThrow();
     expect(del("/x").returns(204, empty())).toBeDefined();
+  });
+  it("should infer issue-based validator data and preserve failures while decoding", async () => {
+    const legacyError = new TypeError("legacy validator failure");
+    const legacyValidator: Validator = {
+      safeParse: () => ({ success: false, error: legacyError }),
+    };
+    const legacyResult = legacyValidator.safeParse(undefined);
+    expect(legacyResult.success ? undefined : legacyResult.error).toBe(legacyError);
+
+    const userSchema = schema.object({
+      id: schema.uuid(),
+      name: schema.string({ minLength: 1 }),
+    });
+    const userCodec = json(userSchema);
+    userCodec satisfies Codec<{ id: string; name: string }>;
+    const validUser = {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      name: "Ada",
+    };
+    const invalidUser = { id: "not-a-uuid", name: "" };
+    const invalidUserResult = userSchema.safeParse(invalidUser);
+    expect(invalidUserResult.success).toBe(false);
+    if (invalidUserResult.success) throw new Error("Expected invalid user fixture");
+
+    const decoded = await createFetch({
+      fetch: async () =>
+        new Response(JSON.stringify(validUser), {
+          headers: { "content-type": "application/json" },
+        }),
+    })({ url: "https://x.test/users/1", response: userCodec });
+    expect(decoded).toMatchObject({ ok: true, data: validUser });
+
+    const invalidDecoded = await createFetch({
+      fetch: async () =>
+        new Response(JSON.stringify(invalidUser), {
+          headers: { "content-type": "application/json" },
+        }),
+    })({ url: "https://x.test/users/1", response: userCodec });
+    expect(invalidDecoded).toMatchObject({
+      ok: false,
+      kind: "decode",
+      error: invalidUserResult.issues,
+    });
+  });
+
+  it("should preserve issue-based validator failures before encoding request bodies", async () => {
+    const userSchema = schema.object({
+      id: schema.uuid(),
+      name: schema.string({ minLength: 1 }),
+    });
+    const userCodec = json(userSchema);
+    const invalidUser = { id: "not-a-uuid", name: "" };
+    const invalidUserResult = userSchema.safeParse(invalidUser);
+    if (invalidUserResult.success) throw new Error("Expected invalid user fixture");
+    const bodyTransport = vi.fn(async () => new Response(null, { status: 204 }));
+    const invalidBody = await createFetch({ fetch: bodyTransport })({
+      url: "https://x.test/users",
+      method: "POST",
+      body: invalidUser,
+      bodyCodec: userCodec,
+      response: empty(),
+    });
+    expect(invalidBody).toMatchObject({
+      ok: false,
+      kind: "request",
+      error: invalidUserResult.issues,
+    });
+    expect(bodyTransport).not.toHaveBeenCalled();
+  });
+
+  it("should preserve issue-based validator failures before serializing parameters", async () => {
+    const idSchema = schema.uuid();
+    const invalidIdResult = idSchema.safeParse("not-a-uuid");
+    if (invalidIdResult.success) throw new Error("Expected invalid id fixture");
+    const api = defineApi({
+      read: get("/users/{id}").params<{ id: string }>({ id: idSchema }).returns(empty()),
+    });
+    const parameterTransport = vi.fn(async () => new Response(null, { status: 204 }));
+    const invalidParameter = await createClient(api, {
+      baseUrl: "https://x.test",
+      fetch: parameterTransport,
+    }).read({ params: { id: "not-a-uuid" } });
+    expect(invalidParameter).toMatchObject({
+      ok: false,
+      kind: "request",
+      error: invalidIdResult.issues,
+    });
+    expect(parameterTransport).not.toHaveBeenCalled();
   });
   it("should round-trip every body codec through Fetch request and response objects", async () => {
     const roundTrip = async (body: unknown, bodyCodec: Codec) =>

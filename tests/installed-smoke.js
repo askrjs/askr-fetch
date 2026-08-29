@@ -26,7 +26,15 @@ try {
   );
   execFileSync(
     npm,
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", tarball],
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-package-lock",
+      tarball,
+      "@askrjs/schema@0.2.1",
+    ],
     { cwd: consumer, stdio: "pipe" },
   );
 
@@ -39,8 +47,9 @@ try {
     join(consumer, "smoke.js"),
     `
       import assert from "node:assert/strict";
-      import { createClient, defineApi, get, text } from "@askrjs/fetch";
+      import { createClient, createFetch, defineApi, get, json, text } from "@askrjs/fetch";
       import { bearerAuth } from "@askrjs/fetch/middleware";
+      import { schema } from "@askrjs/schema";
 
       const api = defineApi({ health: get("/health").returns(text()) });
       const client = createClient(api, {
@@ -56,6 +65,18 @@ try {
       assert.equal(result.kind, "success");
       assert.equal(result.data, "ok");
       assert.equal(result.url, "https://example.test/health");
+
+      const userSchema = schema.object({ id: schema.uuid() });
+      const invalidUser = { id: "not-a-uuid" };
+      const parsed = userSchema.safeParse(invalidUser);
+      assert.equal(parsed.success, false);
+      const invalid = await createFetch({
+        fetch: async () => new Response(JSON.stringify(invalidUser), {
+          headers: { "content-type": "application/json" },
+        }),
+      })({ url: "https://example.test/users/1", response: json(userSchema) });
+      assert.equal(invalid.kind, "decode");
+      assert.deepEqual(invalid.error, parsed.issues);
     `,
   );
   execFileSync(process.execPath, [join(consumer, "smoke.js")], { cwd: consumer, stdio: "pipe" });
@@ -100,18 +121,27 @@ try {
     `
       import { createClient, defineApi, get, json } from "@askrjs/fetch";
       import { retry } from "@askrjs/fetch/middleware";
+      import { schema } from "@askrjs/schema";
+
+      const userSchema = schema.object({
+        id: schema.uuid(),
+        name: schema.string({ minLength: 1 }),
+      });
+      const userCodec = json(userSchema);
 
       const api = defineApi({
         read: get("/items/{id}")
-          .params<{ id: string }>()
-          .returns(200, json<{ id: string }>()),
+          .params<{ id: string }>({ id: schema.uuid() })
+          .returns(200, userCodec),
       });
       const client = createClient(api, {
         baseUrl: "https://example.test",
         middleware: [retry()],
       });
-      const result = await client.read({ params: { id: "item-1" } });
-      if (result.ok && result.status === 200) result.data.id satisfies string;
+      const result = await client.read({
+        params: { id: "550e8400-e29b-41d4-a716-446655440000" },
+      });
+      if (result.ok && result.status === 200) result.data.name satisfies string;
       // @ts-expect-error path parameters remain required from the installed declarations
       void client.read();
     `,

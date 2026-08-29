@@ -1,4 +1,4 @@
-import type { Codec, Validator } from "./types";
+import type { Codec, InferValidator, Validator } from "./types";
 const codec = <T>(
   kind: Codec<T>["kind"],
   mediaTypes: string[],
@@ -7,9 +7,7 @@ const codec = <T>(
 /** Creates a JSON codec, matching `application/json` and `+json` suffixed media types. */
 export function json<T = unknown>(): Codec<T>;
 /** Creates a JSON codec that validates/parses the decoded value with the given schema. */
-export function json<V extends Validator>(
-  schema: V,
-): Codec<V extends Validator<infer T> ? T : never>;
+export function json<V extends Validator>(schema: V): Codec<InferValidator<V>>;
 export function json(schema?: Validator): Codec {
   return codec("json", ["application/json", "+json"], schema);
 }

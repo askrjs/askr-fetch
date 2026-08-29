@@ -30,6 +30,11 @@ const compatible = (codec: Codec, type: string | null) =>
         (expected === "text/*" && type.startsWith("text/")) ||
         (expected === "+json" && type.endsWith("+json")),
     ));
+const validationFailure = (
+  result:
+    | { readonly success: false; readonly error: unknown; readonly issues?: unknown }
+    | { readonly success: false; readonly error?: unknown; readonly issues: unknown },
+): unknown => ("error" in result ? result.error : result.issues);
 async function decode(response: Response, codec: Codec): Promise<unknown> {
   const type = media(response);
   const selected = codec.kind === "content" ? codec.variants?.[type ?? ""] : codec;
@@ -68,7 +73,7 @@ async function decode(response: Response, codec: Codec): Promise<unknown> {
   }
   if (selected.validator) {
     const parsed = selected.validator.safeParse(value);
-    if (!parsed.success) throw parsed.error;
+    if (!parsed.success) throw validationFailure(parsed);
     return parsed.data;
   }
   return value;
@@ -81,7 +86,7 @@ function encode(
 ): BodyInit | undefined {
   if (codec.validator) {
     const parsed = codec.validator.safeParse(value);
-    if (!parsed.success) throw parsed.error;
+    if (!parsed.success) throw validationFailure(parsed);
     value = parsed.data;
   }
   switch (codec.kind) {
@@ -227,7 +232,7 @@ const parameterValue = (map: ParameterMap | undefined, name: string, value: unkn
       : definition?.validator;
   if (!validator) return value;
   const parsed = validator.safeParse(value);
-  if (!parsed.success) throw parsed.error;
+  if (!parsed.success) throw validationFailure(parsed);
   return parsed.data;
 };
 

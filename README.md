@@ -83,10 +83,11 @@ await client.createDocument({
 An omitted or unknown media type produces a `request` failure, so declaration
 order never selects a multi-variant request format.
 
-A validator only needs a `safeParse(value)` method, so schema libraries with that contract can be
-used without an adapter. Validators run for request bodies, path parameters, query parameters,
-headers, and decoded response bodies. Successful validator transformations are used for
-serialization and returned data.
+A validator only needs a `safeParse(value)` method whose failure result exposes either `error` or
+`issues`, so `@askrjs/schema` and other schema libraries with that contract can be used without an
+adapter. Validators run for request bodies, path parameters, query parameters, headers, and decoded
+response bodies. Successful validator transformations are used for serialization and returned data;
+the validator's `error` or `issues` value is preserved on failure.
 
 ```ts
 const positiveInteger = {

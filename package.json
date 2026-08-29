@@ -61,6 +61,7 @@
     "prepublishOnly": "npm run check"
   },
   "devDependencies": {
+    "@askrjs/schema": "^0.2.1",
     "@types/node": "^26.3.0",
     "publint": "^0.3.24",
     "typescript": "^7.0.2",
