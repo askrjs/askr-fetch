@@ -1,12 +1,21 @@
 /**
- * A minimal schema-validation contract, compatible with libraries such as Zod
- * that expose a `safeParse` method (e.g. via a thin adapter).
+ * A minimal schema-validation contract, compatible with `safeParse` methods
+ * that report failures through either `error` or `issues`.
  */
 export interface Validator<T = unknown> {
-  safeParse(value: unknown): { success: true; data: T } | { success: false; error: unknown };
+  safeParse(
+    value: unknown,
+  ):
+    | { readonly success: true; readonly data: T }
+    | { readonly success: false; readonly error: unknown; readonly issues?: unknown }
+    | { readonly success: false; readonly error?: unknown; readonly issues: unknown };
 }
 /** Infers the parsed output type `T` from a {@link Validator}. */
-export type InferValidator<V> = V extends Validator<infer T> ? T : never;
+export type InferValidator<V> = V extends { safeParse(value: unknown): infer Result }
+  ? Extract<Result, { readonly success: true }> extends { readonly data: infer T }
+    ? T
+    : never
+  : never;
 
 /**
  * Describes how a request or response body is serialized/deserialized:
