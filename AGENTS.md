@@ -29,7 +29,7 @@ demonstrated application need.
 ## Validation
 
 Run `npm run check` before opening a pull request. It covers formatting,
-linting, type checking, unit tests, the build, package smoke tests, and
+linting, type checking, unit tests, the build, package checks, and
 publint.
 
 ## Optimization Gate
