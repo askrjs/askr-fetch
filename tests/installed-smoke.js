@@ -33,7 +33,7 @@ try {
       "--no-fund",
       "--no-package-lock",
       tarball,
-      "@askrjs/schema@0.2.1",
+      "@askrjs/schema@0.3.0",
     ],
     { cwd: consumer, stdio: "pipe" },
   );
