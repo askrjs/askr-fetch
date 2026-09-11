@@ -8,6 +8,14 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const sandbox = mkdtempSync(join(tmpdir(), "askr-fetch-installed-"));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const manifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+const schemaRange =
+  manifest.dependencies?.["@askrjs/schema"] ??
+  manifest.peerDependencies?.["@askrjs/schema"] ??
+  manifest.devDependencies?.["@askrjs/schema"];
+if (!schemaRange) {
+  throw new Error("@askrjs/schema must be declared in package.json for the installed smoke test.");
+}
 
 try {
   const packOutput = execFileSync(
@@ -33,7 +41,7 @@ try {
       "--no-fund",
       "--no-package-lock",
       tarball,
-      "@askrjs/schema@0.2.1",
+      `@askrjs/schema@${schemaRange}`,
     ],
     { cwd: consumer, stdio: "pipe" },
   );
