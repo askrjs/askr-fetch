@@ -53,9 +53,10 @@
     "lint": "vp lint src tests vite.config.ts && npm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "test": "vp test run",
+    "test:installed": "node tests/installed-smoke.js",
     "test:publint": "publint",
     "pack:check": "npm pack --ignore-scripts --dry-run --json",
-    "check": "npm run lint && npm test && npm run build && npm run test:publint && npm run pack:check",
+    "check": "npm run lint && npm test && npm run build && npm run test:installed && npm run test:publint && npm run pack:check",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check"
   },
