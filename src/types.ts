@@ -109,6 +109,7 @@ export type SuccessResult<T = unknown, S extends number = number> = {
   mediaType: string | null;
   headers: Headers;
   url: string;
+  /** For stream codecs, this body is the same one-shot stream exposed by `data`. */
   response: Response;
 };
 /** A non-2xx fetch outcome where the server responded with a decodable error body. */
@@ -120,6 +121,7 @@ export type HttpResult<T = unknown, S extends number = number> = {
   mediaType: string | null;
   headers: Headers;
   url: string;
+  /** For stream codecs, this body is the same one-shot stream exposed by `error`. */
   response: Response;
 };
 /** Categorizes why a fetch could not produce an {@link HttpResult} or {@link SuccessResult}. */
