@@ -30,6 +30,8 @@ const compatible = (codec: Codec, type: string | null) =>
         (expected === "text/*" && type.startsWith("text/")) ||
         (expected === "+json" && type.endsWith("+json")),
     ));
+const selectCodec = (codec: Codec, response: Response): Codec | undefined =>
+  codec.kind === "content" ? codec.variants?.[media(response) ?? ""] : codec;
 const validationFailure = (
   result:
     | { readonly success: false; readonly error: unknown; readonly issues?: unknown }
@@ -346,7 +348,9 @@ export function createFetch(options: ClientOptions = {}) {
           response,
         );
       try {
-        const data = await decode(response.clone(), codec);
+        const selected = selectCodec(codec, response);
+        const decodingResponse = selected?.kind === "stream" ? response : response.clone();
+        const data = await decode(decodingResponse, codec);
         return response.ok
           ? {
               ok: true,
