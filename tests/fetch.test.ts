@@ -130,6 +130,87 @@ describe("fetch contracts", () => {
     ).toMatchObject({ kind: "abort" });
     expect(transport).not.toHaveBeenCalled();
   }, 15_000);
+  it("should keep the caller abort signal connected while a response stream is open", async () => {
+    const caller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const result = await createFetch({
+      fetch: async (request) => {
+        requestSignal = request.signal;
+        request.signal.addEventListener(
+          "abort",
+          () => streamController?.error(request.signal.reason),
+          { once: true },
+        );
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+          { headers: { "content-type": "application/octet-stream" } },
+        );
+      },
+    })({ url: "https://x.test", response: stream(), signal: caller.signal });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.response.body).toBe(result.data);
+    expect(requestSignal?.aborted).toBe(false);
+    const pendingRead = (result.data as ReadableStream<Uint8Array>).getReader().read();
+    caller.abort(new Error("caller stopped reading"));
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(pendingRead).rejects.toThrow("caller stopped reading");
+  });
+  it("should keep the timeout active until a response stream finishes", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const result = await createFetch({
+      fetch: async (request) => {
+        requestSignal = request.signal;
+        request.signal.addEventListener(
+          "abort",
+          () => streamController?.error(request.signal.reason),
+          { once: true },
+        );
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+          { headers: { "content-type": "application/octet-stream" } },
+        );
+      },
+    })({ url: "https://x.test", response: stream(), timeout: 50 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(requestSignal?.aborted).toBe(true);
+    await expect((result.data as ReadableStream<Uint8Array>).getReader().read()).rejects.toThrow(
+      /Timed out/,
+    );
+  });
+  it("should clear a stream timeout after its body closes", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const result = await createFetch({
+      fetch: async (request) => {
+        requestSignal = request.signal;
+        return new Response("done", {
+          headers: { "content-type": "application/octet-stream" },
+        });
+      },
+    })({ url: "https://x.test", response: stream(), timeout: 100 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const reader = (result.data as ReadableStream<Uint8Array>).getReader();
+    await expect(reader.read()).resolves.toMatchObject({ done: false });
+    await expect(reader.read()).resolves.toMatchObject({ done: true });
+    await new Promise((resolve) => setTimeout(resolve, 125));
+    expect(requestSignal?.aborted).toBe(false);
+  });
   it("should decode codecs given actual compatible content types when responding", async () => {
     const execute = createFetch({
       fetch: async () =>

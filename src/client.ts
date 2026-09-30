@@ -80,6 +80,54 @@ async function decode(response: Response, codec: Codec): Promise<unknown> {
   }
   return value;
 }
+
+function responseWithStreamCleanup(response: Response, cleanup: () => void): Response {
+  const source = response.body;
+  if (!source) {
+    cleanup();
+    return response;
+  }
+
+  const reader = source.getReader();
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(streamController) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          finish();
+          streamController.close();
+        } else {
+          streamController.enqueue(chunk.value);
+        }
+      } catch (error) {
+        finish();
+        streamController.error(error);
+      }
+    },
+    async cancel(reason) {
+      finish();
+      return reader.cancel(reason);
+    },
+  });
+  const wrapped = new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+  Object.defineProperties(wrapped, {
+    url: { value: response.url, enumerable: true },
+    redirected: { value: response.redirected, enumerable: true },
+    type: { value: response.type, enumerable: true },
+  });
+  return wrapped;
+}
+
 function encode(
   value: unknown,
   codec: Codec,
@@ -295,18 +343,20 @@ export function createFetch(options: ClientOptions = {}) {
     const controller = new AbortController();
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let streamOwnsCleanup = false;
     const abort = () => controller.abort(call.signal?.reason);
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      call.signal?.removeEventListener("abort", abort);
+    };
+    controller.signal.addEventListener("abort", cleanup, { once: true });
     call.signal?.addEventListener("abort", abort, { once: true });
-    if (call.signal?.aborted) abort();
     if (timeout !== undefined)
       timer = setTimeout(() => {
         timedOut = true;
         controller.abort(new DOMException("Timed out", "TimeoutError"));
       }, timeout);
-    const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      call.signal?.removeEventListener("abort", abort);
-    };
+    if (call.signal?.aborted) abort();
     if (controller.signal.aborted) {
       cleanup();
       return failure("abort", controller.signal.reason, url);
@@ -350,7 +400,13 @@ export function createFetch(options: ClientOptions = {}) {
       try {
         const selected = selectCodec(codec, response);
         const decodingResponse = selected?.kind === "stream" ? response : response.clone();
-        const data = await decode(decodingResponse, codec);
+        let data = await decode(decodingResponse, codec);
+        let resultResponse = response;
+        if (selected?.kind === "stream" && response.body) {
+          resultResponse = responseWithStreamCleanup(response, cleanup);
+          streamOwnsCleanup = true;
+          data = resultResponse.body;
+        }
         return response.ok
           ? {
               ok: true,
@@ -359,8 +415,8 @@ export function createFetch(options: ClientOptions = {}) {
               data,
               mediaType: media(response),
               headers: response.headers,
-              url: response.url || url,
-              response,
+              url: resultResponse.url || url,
+              response: resultResponse,
             }
           : {
               ok: false,
@@ -369,8 +425,8 @@ export function createFetch(options: ClientOptions = {}) {
               error: data,
               mediaType: media(response),
               headers: response.headers,
-              url: response.url || url,
-              response,
+              url: resultResponse.url || url,
+              response: resultResponse,
             };
       } catch (error) {
         return failure("decode", error, url, response);
@@ -399,7 +455,7 @@ export function createFetch(options: ClientOptions = {}) {
     } catch (error) {
       return failure("middleware", error, url);
     } finally {
-      cleanup();
+      if (!streamOwnsCleanup) cleanup();
     }
   };
 }
