@@ -4,11 +4,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "@typescript/typescript6";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const sandbox = mkdtempSync(join(tmpdir(), "askr-fetch-installed-"));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const manifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+const contract = JSON.parse(
+  readFileSync(join(repositoryRoot, "tests", "public-contract.json"), "utf8"),
+);
 const schemaRange =
   manifest.dependencies?.["@askrjs/schema"] ??
   manifest.peerDependencies?.["@askrjs/schema"] ??
@@ -50,6 +54,22 @@ try {
     readFileSync(join(consumer, "node_modules", "@askrjs", "fetch", "package.json"), "utf8"),
   );
   assert.equal(installedPackage.dependencies, undefined);
+  assert.deepEqual(Object.keys(installedPackage.exports).sort(), contract.exportKeys.sort());
+
+  writeFileSync(
+    join(consumer, "surface.js"),
+    `
+    import assert from "node:assert/strict";
+    import * as root from "@askrjs/fetch";
+    import * as middleware from "@askrjs/fetch/middleware";
+    assert.deepEqual(Object.keys(root).sort(), ${JSON.stringify(contract.rootValues)});
+    assert.deepEqual(Object.keys(middleware).sort(), ${JSON.stringify(contract.middlewareValues)});
+    for (const subpath of ${JSON.stringify(contract.privateSubpaths)}) {
+      await assert.rejects(import("@askrjs/fetch/" + subpath), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+    }
+  `,
+  );
+  execFileSync(process.execPath, [join(consumer, "surface.js")], { cwd: consumer, stdio: "pipe" });
 
   writeFileSync(
     join(consumer, "smoke.js"),
@@ -128,6 +148,7 @@ try {
     join(consumer, "fixture.ts"),
     `
       import { createClient, defineApi, get, json } from "@askrjs/fetch";
+      import type { ClientOptions, Codec, FetchResult, Middleware, Validator } from "@askrjs/fetch";
       import { retry } from "@askrjs/fetch/middleware";
       import { schema } from "@askrjs/schema";
 
@@ -136,6 +157,14 @@ try {
         name: schema.string({ minLength: 1 }),
       });
       const userCodec = json(userSchema);
+      userCodec satisfies Codec<{ id: string; name: string }>;
+      const passthrough: Middleware = (context, next) => next(context);
+      const options: ClientOptions = { middleware: [passthrough, retry()] };
+      const validator: Validator<number> = {
+        safeParse: (value) => ({ success: true, data: Number(value) }),
+      };
+      json(validator) satisfies Codec<number>;
+      const outcomeKind = (result: FetchResult) => result.kind;
 
       const api = defineApi({
         read: get("/items/{id}")
@@ -143,6 +172,7 @@ try {
           .returns(200, userCodec),
       });
       const client = createClient(api, {
+        ...options,
         baseUrl: "https://example.test",
         middleware: [retry()],
       });
@@ -150,10 +180,22 @@ try {
         params: { id: "550e8400-e29b-41d4-a716-446655440000" },
       });
       if (result.ok && result.status === 200) result.data.name satisfies string;
+      outcomeKind(result);
       // @ts-expect-error path parameters remain required from the installed declarations
       void client.read();
     `,
   );
+  const removedFixture = [
+    ...contract.removedRoot.map(
+      (name) =>
+        `// @ts-expect-error removed public name\nimport ${name === "pathNames" ? "" : "type "}{ ${name} } from "@askrjs/fetch";`,
+    ),
+    ...contract.removedMiddleware.map(
+      (name) =>
+        `// @ts-expect-error removed public middleware type\nimport type { ${name} } from "@askrjs/fetch/middleware";`,
+    ),
+  ].join("\n");
+  writeFileSync(join(consumer, "removed.ts"), removedFixture + "\n");
   writeFileSync(
     join(consumer, "tsconfig.json"),
     `${JSON.stringify(
@@ -166,7 +208,7 @@ try {
           noEmit: true,
           lib: ["ES2022", "DOM", "DOM.Iterable"],
         },
-        include: ["fixture.ts"],
+        include: ["fixture.ts", "removed.ts"],
       },
       null,
       2,
@@ -181,6 +223,48 @@ try {
     ],
     { cwd: consumer, stdio: "pipe" },
   );
+  // The native TypeScript 7 CLI checks consumer inference above; TypeScript 6
+  // supplies the compiler API for a complete declaration export inventory.
+  const fixturePath = join(consumer, "fixture.ts");
+  const program = ts.createProgram([fixturePath, join(consumer, "removed.ts")], {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    strict: true,
+    noEmit: true,
+    lib: ["lib.es2022.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  assert.equal(
+    diagnostics.length,
+    0,
+    ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+      getCanonicalFileName: (name) => name,
+      getCurrentDirectory: () => consumer,
+      getNewLine: () => "\n",
+    }),
+  );
+  const checker = program.getTypeChecker();
+  for (const [name, expected] of [
+    ["@askrjs/fetch", [...contract.rootValues, ...contract.rootTypes].sort()],
+    ["@askrjs/fetch/middleware", contract.middlewareValues],
+  ]) {
+    const declaration = program
+      .getSourceFile(fixturePath)
+      .statements.find(
+        (statement) => ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === name,
+      );
+    assert.ok(declaration, `missing consumer import for ${name}`);
+    const symbol = checker.getSymbolAtLocation(declaration.moduleSpecifier);
+    assert.ok(symbol, `unresolved declaration module for ${name}`);
+    assert.deepEqual(
+      checker
+        .getExportsOfModule(symbol)
+        .map((item) => item.name)
+        .sort(),
+      expected,
+    );
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }

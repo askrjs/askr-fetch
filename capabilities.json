@@ -29,7 +29,7 @@
       "exports": ["bearerAuth", "apiKeyAuth", "logging", "retry", "telemetry"],
       "constraints": [
         "middleware runs in declaration order",
-        "request bodies are not retried automatically"
+        "cloneable request bodies may be retried; streaming or consumed bodies are sent once"
       ],
       "stability": "stable",
       "docs": "https://github.com/askrjs/askr-fetch/blob/main/README.md",
