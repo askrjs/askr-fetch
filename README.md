@@ -179,6 +179,13 @@ Set a default timeout on the client or override it for one call. A caller `Abort
 with the timeout signal. Timeouts return `kind: "timeout"`; caller cancellation returns
 `kind: "abort"`.
 
+Calls settle on cancellation even while asynchronous middleware or a custom
+transport is still pending. Cancellation stops subsequent middleware and transport calls;
+abort/timeout during buffered decoding preserves its cause and response context.
+Late completion or rejection cannot replace the cancelled result. Pending timers
+and package-owned abort listeners are released. Providers and custom transports
+still own cancellation of their internal work.
+
 ```ts
 const controller = new AbortController();
 const pending = client.getUser({
@@ -206,3 +213,11 @@ const result = await execute({
   response: json<{ status: "ok" }>(),
 });
 ```
+
+## 0.5.0 preparation
+
+The prepared public surface has 31 names across the root and middleware
+entrypoints. See the [complete API decisions and migration](docs/0.5.0-api.md)
+for every removed name and its replacement, and the
+[executed hardening record](docs/0.5.0-hardening.md) for failure/recovery probes.
+The manifest remains on 0.4.x until coordinated release qualification.
