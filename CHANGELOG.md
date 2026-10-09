@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a backwards wall-clock adjustment.
 - Update compatible development tooling and transitive dependencies to clear
   the reported formatter/worker and source-map advisories.
+- Run packed-test npm commands through Node so the test executes on Windows.
 
 ## 0.4.2 - 2026-09-30
 

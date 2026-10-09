@@ -8,7 +8,9 @@ import ts from "@typescript/typescript6";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const sandbox = mkdtempSync(join(tmpdir(), "askr-fetch-installed-"));
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
+if (!npmCli) throw new Error("Run the installed smoke test through npm run test:installed.");
+const runNpm = (args, options) => execFileSync(process.execPath, [npmCli, ...args], options);
 const manifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
 const contract = JSON.parse(
   readFileSync(join(repositoryRoot, "tests", "public-contract.json"), "utf8"),
@@ -22,11 +24,10 @@ if (!schemaRange) {
 }
 
 try {
-  const packOutput = execFileSync(
-    npm,
-    ["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox],
-    { cwd: repositoryRoot, encoding: "utf8" },
-  );
+  const packOutput = runNpm(["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
   const packed = JSON.parse(packOutput);
   const { filename } = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
   const tarball = join(sandbox, filename);
@@ -36,8 +37,7 @@ try {
     join(consumer, "package.json"),
     `${JSON.stringify({ name: "consumer", private: true, type: "module" }, null, 2)}\n`,
   );
-  execFileSync(
-    npm,
+  runNpm(
     [
       "install",
       "--ignore-scripts",
