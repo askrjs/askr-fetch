@@ -1,5 +1,5 @@
 import { getEventListeners } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createFetch, empty, stream, text, type Middleware } from "../src";
 import { bearerAuth, retry } from "../src/middleware";
 

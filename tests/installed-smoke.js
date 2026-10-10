@@ -40,7 +40,6 @@ try {
   runNpm(
     [
       "install",
-      "--ignore-scripts",
       "--no-audit",
       "--no-fund",
       "--no-package-lock",
