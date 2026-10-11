@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-10
+
 ### Breaking changes
 
 - Prepare the 0.5.0 root and middleware barrels as a curated 31-name surface,
@@ -39,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update compatible development tooling and transitive dependencies to clear
   the reported formatter/worker and source-map advisories.
 - Run packed-test npm commands through Node so the test executes on Windows.
+
+### Development
+
+- First-party development workflows use Vite+; specialized compiler, runtime,
+  browser, and package checks remain part of validation.
 
 ## 0.4.2 - 2026-09-30
 
