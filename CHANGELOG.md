@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-12
+
+### Changed
+
+- Coordinate the Schema development dependency on `>=0.5.0 <0.6.0`.
+
 ### Breaking changes
 
 - Prepare the 0.5.0 root and middleware barrels as a curated 31-name surface,
