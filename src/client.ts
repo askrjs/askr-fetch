@@ -344,6 +344,12 @@ export function createFetch(options: ClientOptions = {}) {
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let streamOwnsCleanup = false;
+    let pendingStream: ReadableStream<Uint8Array> | undefined;
+    const discardStream = (reason: unknown) => {
+      void pendingStream?.cancel(reason).catch(() => {});
+      pendingStream = undefined;
+      streamOwnsCleanup = false;
+    };
     const abort = () => controller.abort(call.signal?.reason);
     const cleanup = () => {
       if (timer) clearTimeout(timer);
@@ -376,7 +382,13 @@ export function createFetch(options: ClientOptions = {}) {
       return failure("request", error, url);
     }
     const transport = options.fetch ?? globalThis.fetch;
+    let activeResponse: Response | undefined;
+    const cancelled = (signal = controller.signal) =>
+      failure(timedOut ? "timeout" : "abort", signal.reason, url, activeResponse);
     const terminal = async (context: RequestContext): Promise<FetchResult> => {
+      // Middleware may await credentials or other work after dispatch starts.
+      if (controller.signal.aborted) return cancelled();
+      if (context.request.signal.aborted) return cancelled(context.request.signal);
       let response: Response;
       try {
         response = await transport(context.request);
@@ -387,6 +399,10 @@ export function createFetch(options: ClientOptions = {}) {
           url,
         );
       }
+      activeResponse = response;
+      // Custom transports may finish after the call has already been cancelled.
+      if (controller.signal.aborted) return cancelled();
+      if (context.request.signal.aborted) return cancelled(context.request.signal);
       const codec = response.ok
         ? (call.responses?.[response.status] ?? call.response)
         : (call.errors?.[response.status] ?? call.errors?.default);
@@ -401,12 +417,16 @@ export function createFetch(options: ClientOptions = {}) {
         const selected = selectCodec(codec, response);
         const decodingResponse = selected?.kind === "stream" ? response : response.clone();
         let data = await decode(decodingResponse, codec);
+        if (controller.signal.aborted) return cancelled();
+        if (context.request.signal.aborted) return cancelled(context.request.signal);
         let resultResponse = response;
         if (selected?.kind === "stream" && response.body) {
           resultResponse = responseWithStreamCleanup(response, cleanup);
           streamOwnsCleanup = true;
           data = resultResponse.body;
+          pendingStream = resultResponse.body!;
         }
+        if (!streamOwnsCleanup) activeResponse = undefined;
         return response.ok
           ? {
               ok: true,
@@ -429,6 +449,14 @@ export function createFetch(options: ClientOptions = {}) {
               response: resultResponse,
             };
       } catch (error) {
+        if (controller.signal.aborted) return cancelled();
+        if (context.request.signal.aborted)
+          return failure(
+            timedOut ? "timeout" : "abort",
+            context.request.signal.reason,
+            url,
+            response,
+          );
         return failure("decode", error, url, response);
       }
     };
@@ -436,11 +464,13 @@ export function createFetch(options: ClientOptions = {}) {
     const dispatch = (index: number, context: RequestContext): Promise<FetchResult> =>
       index === middleware.length
         ? terminal(context)
-        : Promise.resolve().then(() =>
-            middleware[index]!(context, (next = context) => dispatch(index + 1, next)),
-          );
+        : Promise.resolve().then(() => {
+            if (controller.signal.aborted) return cancelled();
+            if (context.request.signal.aborted) return cancelled(context.request.signal);
+            return middleware[index]!(context, (next = context) => dispatch(index + 1, next));
+          });
     try {
-      return await dispatch(
+      const pending = dispatch(
         0,
         Object.freeze({
           request,
@@ -452,7 +482,36 @@ export function createFetch(options: ClientOptions = {}) {
           ...(timeout === undefined ? {} : { deadline: Date.now() + timeout }),
         }),
       );
+      // The call owns cancellation even when a provider or custom transport
+      // ignores its signal. Both handlers also consume any late rejection.
+      const result = await new Promise<FetchResult>((resolve, reject) => {
+        const onAbort = () => {
+          controller.signal.removeEventListener("abort", onAbort);
+          discardStream(controller.signal.reason);
+          resolve(cancelled());
+        };
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+        pending.then(
+          (value) => {
+            controller.signal.removeEventListener("abort", onAbort);
+            pendingStream = undefined;
+            activeResponse = undefined;
+            resolve(value);
+          },
+          (error) => {
+            controller.signal.removeEventListener("abort", onAbort);
+            reject(error);
+          },
+        );
+        if (controller.signal.aborted) onAbort();
+      });
+      // Retry's signal-only cancellation result still belongs to this call's
+      // timeout when its controller, rather than the caller, ended the wait.
+      return timedOut && result.kind === "abort"
+        ? failure("timeout", controller.signal.reason, url)
+        : result;
     } catch (error) {
+      discardStream(error);
       return failure("middleware", error, url);
     } finally {
       if (!streamOwnsCleanup) cleanup();

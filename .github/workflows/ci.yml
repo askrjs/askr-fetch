@@ -55,3 +55,16 @@ jobs:
         run: |
           npm run typecheck --if-present
           npm run test:types --if-present
+
+      - name: Test packed consumers
+        run: npm run test:installed
+
+      - name: Measure package coverage
+        run: npm run test:coverage
+
+      - name: Upload package coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fetch-coverage-${{ matrix.os }}
+          path: coverage/

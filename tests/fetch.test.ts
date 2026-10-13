@@ -17,7 +17,6 @@ import {
   multipart,
   options,
   patch,
-  pathNames,
   post,
   put,
   stream,
@@ -28,6 +27,7 @@ import {
   type Middleware,
   type Validator,
 } from "../src";
+import { pathNames } from "../src/dsl";
 import { apiKeyAuth, bearerAuth, logging, retry, telemetry } from "../src/middleware";
 
 describe("fetch contracts", () => {
