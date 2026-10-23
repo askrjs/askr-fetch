@@ -7,3 +7,4 @@ coverage/
 
 # Local agent state and worktrees
 .claude/
+.vitest/
