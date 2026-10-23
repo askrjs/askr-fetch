@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createFetch, json } from "../src";
 
 describe("non-success response decoding context", () => {
