@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { schema } from "@askrjs/schema";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   arrayBuffer,
   blob,

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "@typescript/typescript6";
+import ts from "typescript";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const sandbox = mkdtempSync(join(tmpdir(), "askr-fetch-installed-"));
@@ -217,7 +217,7 @@ try {
   execFileSync(
     process.execPath,
     [
-      join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"),
+      join(repositoryRoot, "node_modules", "@typescript", "native", "bin", "tsc"),
       "--project",
       "tsconfig.json",
     ],
