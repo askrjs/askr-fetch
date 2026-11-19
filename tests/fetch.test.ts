@@ -569,6 +569,77 @@ describe("fetch contracts", () => {
     expect(JSON.stringify(logs)).not.toContain("query-secret");
     expect(JSON.stringify(logs)).toContain("REDACTED");
   });
+  it("cancels the discarded retry body without waiting for cleanup", async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 503 }))
+      .mockResolvedValueOnce(new Response("ok", { headers: { "content-type": "text/plain" } }));
+    const result = await createFetch({
+      middleware: [retry({ attempts: 2, delay: () => 0 })],
+      fetch,
+    })({ url: "https://x.test", response: text() });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await result.response?.text()).toBe("ok");
+  });
+  it("preserves the final body after a discarded body's cancellation rejects", async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error("cleanup");
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 503 }))
+      .mockResolvedValueOnce(new Response("final", { status: 503 }));
+    const result = await createFetch({
+      middleware: [retry({ attempts: 2, delay: () => 0 })],
+      fetch,
+    })({
+      url: "https://x.test",
+      response: text(),
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(503);
+    expect(await result.response?.text()).toBe("final");
+  });
+  it.each(["abort", "timeout"])("honors %s during the second attempt", async (kind) => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let entered!: () => void;
+      const second = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockImplementationOnce(
+          (request: Request) =>
+            new Promise<Response>((_resolve, reject) => {
+              entered();
+              request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+                once: true,
+              });
+            }),
+        );
+      const pending = createFetch({
+        middleware: [retry({ attempts: 2, delay: () => 1 })],
+        fetch,
+        timeout: 100,
+      })({
+        url: "https://x.test",
+        response: text(),
+        signal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      await second;
+      if (kind === "abort") controller.abort();
+      else await vi.advanceTimersByTimeAsync(99);
+      expect(await pending).toMatchObject({ ok: false, kind });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("should retry configured statuses given an undecodable error response when executing", async () => {
     const transport = vi
       .fn<(request: Request) => Promise<Response>>()
