@@ -95,6 +95,15 @@ describe("fetch contracts", () => {
       kind: "middleware",
     });
   });
+  it("should decode structured +json media types as JSON", async () => {
+    const result = await createFetch({
+      fetch: async () =>
+        new Response('{"ok":true}', {
+          headers: { "content-type": "application/vnd.example+json; charset=utf-8" },
+        }),
+    })({ url: "https://x.test", response: json<{ ok: boolean }>() });
+    expect(result).toMatchObject({ kind: "success", data: { ok: true } });
+  });
   it("should distinguish timeout from caller abort given cancellation when executing", async () => {
     const hanging = async (request: Request) => {
       await new Promise((resolve) => setTimeout(resolve, 25));
