@@ -163,7 +163,6 @@ export function retry(options: RetryOptions = {}): Middleware {
       } catch {
         break;
       }
-      if ("response" in result) void result.response?.body?.cancel().catch(() => {});
       result = await next(Object.freeze({ ...context, attempt, request }));
     }
     return result;
