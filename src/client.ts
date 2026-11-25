@@ -549,16 +549,12 @@ type Successes<D> =
     : never;
 type Errors<D> =
   D extends EndpointDescriptor<any, any, any, any, any, infer E>
-    ?
-        | {
-            [S in Exclude<keyof E, "default"> & number]: HttpResult<
-              InferCodec<NonNullable<E[S]>>,
-              S
-            >;
-          }[Exclude<keyof E, "default"> & number]
-        | ("default" extends keyof E
-            ? HttpResult<InferCodec<NonNullable<E["default"]>>, number>
-            : never)
+    ? | {
+          [S in Exclude<keyof E, "default"> & number]: HttpResult<InferCodec<NonNullable<E[S]>>, S>;
+        }[Exclude<keyof E, "default"> & number]
+      | ("default" extends keyof E
+          ? HttpResult<InferCodec<NonNullable<E["default"]>>, number>
+          : never)
     : never;
 /** The possible results of calling a typed client method for endpoint descriptor `D`. */
 export type ClientResult<D extends AnyEndpointDescriptor> =
