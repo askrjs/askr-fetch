@@ -123,6 +123,8 @@ export function retry(options: RetryOptions = {}): Middleware {
         (result.response !== undefined && statuses.includes(result.status)));
       attempt++
     ) {
+      const discarded = result.response?.body;
+      if (discarded) void discarded.cancel().catch(() => {});
       const retryAfter = "response" in result ? result.response?.headers.get("retry-after") : null;
       const fallback = () => options.delay?.(attempt) ?? 100 * 2 ** (attempt - 2);
       const parsedRetryAfter = retryAfter
@@ -163,7 +165,6 @@ export function retry(options: RetryOptions = {}): Middleware {
       } catch {
         break;
       }
-      if ("response" in result) void result.response?.body?.cancel().catch(() => {});
       result = await next(Object.freeze({ ...context, attempt, request }));
     }
     return result;
