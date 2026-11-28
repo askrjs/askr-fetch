@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-28
+
+### Fixed
+
+- Cancel discarded response bodies before retrying requests.
+
 ## 0.5.0 - 2026-10-12
 
 ### Changed
