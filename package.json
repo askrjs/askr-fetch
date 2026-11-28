@@ -1,6 +1,6 @@
 {
   "name": "@askrjs/fetch",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Function-first typed HTTP contracts and clients for Askr.",
   "keywords": [
     "askr",
